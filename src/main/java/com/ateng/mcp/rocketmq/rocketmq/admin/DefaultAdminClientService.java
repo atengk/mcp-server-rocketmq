@@ -10,6 +10,11 @@ import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerGroupListDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerLagDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerLagSummaryDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerQueueLagDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.DlqMessageListDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.MessageDetailDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.MessageListDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.MessageTraceDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.MessageTraceNodeDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.QueueDataDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.SubscriptionDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopConsumerLagDTO;
@@ -19,9 +24,13 @@ import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicQueueOffsetDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicRouteDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicStatusDTO;
 import com.ateng.mcp.rocketmq.rocketmq.util.ConsumerGroupFilterUtils;
+import com.ateng.mcp.rocketmq.rocketmq.util.MessageBodyGuard;
 import com.ateng.mcp.rocketmq.rocketmq.util.TopicFilterUtils;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
+import org.apache.rocketmq.client.QueryResult;
+import org.apache.rocketmq.client.trace.TraceView;
+import org.apache.rocketmq.common.message.MessageExt;
 import org.apache.rocketmq.common.message.MessageQueue;
 import org.apache.rocketmq.remoting.exception.RemotingConnectException;
 import org.apache.rocketmq.remoting.exception.RemotingSendRequestException;
@@ -649,6 +658,219 @@ public class DefaultAdminClientService implements AdminClientService, Initializi
         List<ConsumerLagSummaryDTO> topResults = summaries.stream().limit(limit).collect(Collectors.toList());
 
         return new TopConsumerLagDTO(groupListDTO.getTotalCount(), topResults);
+    }
+
+    private MessageDetailDTO convertMessageExtToDTO(MessageExt msg) {
+        if (msg == null) {
+            return null;
+        }
+        String uniqKey = msg.getProperty(org.apache.rocketmq.common.message.MessageConst.PROPERTY_UNIQ_CLIENT_MESSAGE_ID_KEYIDX);
+        String clientMsgId = (uniqKey != null && !uniqKey.isBlank()) ? uniqKey.trim() : msg.getMsgId();
+        MessageDetailDTO dto = new MessageDetailDTO(clientMsgId, msg.getTopic());
+        dto.setOffsetMsgId(msg.getMsgId());
+        dto.setTags(msg.getTags());
+        dto.setKeys(msg.getKeys());
+        dto.setQueueId(msg.getQueueId());
+        dto.setQueueOffset(msg.getQueueOffset());
+        dto.setBornTimestamp(msg.getBornTimestamp());
+        dto.setStoreTimestamp(msg.getStoreTimestamp());
+        dto.setReconsumeTimes(msg.getReconsumeTimes());
+        if (msg.getBornHost() != null) {
+            dto.setBornHost(formatSocketAddress(msg.getBornHost()));
+        }
+        if (msg.getStoreHost() != null) {
+            dto.setStoreHost(formatSocketAddress(msg.getStoreHost()));
+        }
+        if (msg.getProperties() != null) {
+            dto.setProperties(new HashMap<>(msg.getProperties()));
+        }
+        byte[] body = msg.getBody();
+        dto.setBodySize(body != null ? body.length : 0);
+        dto.setBody(MessageBodyGuard.protect(body));
+        return dto;
+    }
+
+    private String formatSocketAddress(java.net.SocketAddress socketAddress) {
+        if (socketAddress == null) {
+            return null;
+        }
+        String str = socketAddress.toString();
+        return str.startsWith("/") ? str.substring(1) : str;
+    }
+
+    @Override
+    public MessageDetailDTO queryMessageById(String msgId, String topic) throws Exception {
+        if (msgId == null || msgId.isBlank()) {
+            throw new IllegalArgumentException("msgId 不能为空");
+        }
+        String targetId = msgId.trim();
+        String targetTopic = (topic != null && !topic.isBlank()) ? topic.trim() : null;
+
+        MessageExt msg = null;
+        try {
+            msg = doQueryMessageById(targetId, targetTopic);
+        } catch (RemotingConnectException | RemotingTimeoutException | RemotingSendRequestException e) {
+            log.warn("Connection lost when querying message by id {}. Triggering reconnect: {}", targetId, e.getMessage());
+            reconnect();
+            msg = doQueryMessageById(targetId, targetTopic);
+        }
+
+        if (msg == null) {
+            throw new IllegalArgumentException("未找到 ID 为 " + targetId + " 的消息");
+        }
+        return convertMessageExtToDTO(msg);
+    }
+
+    private MessageExt doQueryMessageById(String targetId, String targetTopic) throws Exception {
+        DefaultMQAdminExt client = ensureStarted();
+        if (targetTopic != null) {
+            return client.viewMessage(targetTopic, targetId);
+        }
+
+        TopicListDTO topicListDTO = listTopics(false);
+        if (topicListDTO != null && topicListDTO.getTopics() != null) {
+            for (String currentTopic : topicListDTO.getTopics()) {
+                try {
+                    MessageExt candidate = client.viewMessage(currentTopic, targetId);
+                    if (candidate != null) {
+                        return candidate;
+                    }
+                } catch (Exception ignored) {
+                    // 业务主题未匹配当前消息，继续遍历下一个主题
+                }
+            }
+        }
+        return null;
+    }
+
+    @Override
+    public MessageListDTO queryMessageByKey(String topic, String key, Long beginTimestamp, Long endTimestamp, Integer maxNum) throws Exception {
+        if (topic == null || topic.isBlank()) {
+            throw new IllegalArgumentException("topic 不能为空");
+        }
+        if (key == null || key.isBlank()) {
+            throw new IllegalArgumentException("key 不能为空");
+        }
+
+        String targetTopic = topic.trim();
+        String targetKey = key.trim();
+        long end = (endTimestamp != null && endTimestamp > 0) ? endTimestamp : System.currentTimeMillis();
+        long begin = (beginTimestamp != null && beginTimestamp > 0) ? beginTimestamp : (end - 24L * 3600 * 1000);
+        int max = (maxNum != null && maxNum > 0) ? maxNum : 32;
+
+        QueryResult qr = null;
+        try {
+            DefaultMQAdminExt client = ensureStarted();
+            qr = client.queryMessage(targetTopic, targetKey, max, begin, end);
+        } catch (RemotingConnectException | RemotingTimeoutException | RemotingSendRequestException e) {
+            log.warn("Connection lost when querying message by key {} on topic {}. Triggering reconnect: {}", targetKey, targetTopic, e.getMessage());
+            reconnect();
+            DefaultMQAdminExt client = ensureStarted();
+            qr = client.queryMessage(targetTopic, targetKey, max, begin, end);
+        } catch (Exception e) {
+            log.warn("No message found or query failed for key {} on topic {}: {}", targetKey, targetTopic, e.getMessage());
+        }
+
+        if (qr == null || qr.getMessageList() == null || qr.getMessageList().isEmpty()) {
+            return new MessageListDTO(Collections.emptyList());
+        }
+
+        List<MessageDetailDTO> list = qr.getMessageList().stream()
+                .map(this::convertMessageExtToDTO)
+                .collect(Collectors.toList());
+        return new MessageListDTO(list);
+    }
+
+    @Override
+    public DlqMessageListDTO queryDlqMessages(String consumerGroup, Long beginTimestamp, Long endTimestamp, Integer maxNum) throws Exception {
+        if (consumerGroup == null || consumerGroup.isBlank()) {
+            throw new IllegalArgumentException("consumerGroup 不能为空");
+        }
+
+        String group = consumerGroup.trim();
+        String dlqTopic = "%DLQ%" + group;
+        long end = (endTimestamp != null && endTimestamp > 0) ? endTimestamp : System.currentTimeMillis();
+        long begin = (beginTimestamp != null && beginTimestamp > 0) ? beginTimestamp : (end - 24L * 3600 * 1000);
+        int max = (maxNum != null && maxNum > 0) ? maxNum : 32;
+
+        QueryResult qr = null;
+        try {
+            DefaultMQAdminExt client = ensureStarted();
+            qr = client.queryMessage(dlqTopic, "*", max, begin, end);
+        } catch (RemotingConnectException | RemotingTimeoutException | RemotingSendRequestException e) {
+            log.warn("Connection lost when querying dlq messages for {}. Triggering reconnect: {}", group, e.getMessage());
+            reconnect();
+            DefaultMQAdminExt client = ensureStarted();
+            qr = client.queryMessage(dlqTopic, "*", max, begin, end);
+        } catch (Exception e) {
+            log.info("No DLQ messages found or DLQ topic does not exist for consumer group {}: {}", group, e.getMessage());
+        }
+
+        List<MessageDetailDTO> list = (qr != null && qr.getMessageList() != null)
+                ? qr.getMessageList().stream().map(this::convertMessageExtToDTO).collect(Collectors.toList())
+                : Collections.emptyList();
+
+        return new DlqMessageListDTO(group, dlqTopic, list);
+    }
+
+    @Override
+    public MessageTraceDTO queryMessageTrace(String msgId, String topic) throws Exception {
+        if (msgId == null || msgId.isBlank()) {
+            throw new IllegalArgumentException("msgId 不能为空");
+        }
+
+        String targetId = msgId.trim();
+        String targetTopic = (topic != null && !topic.isBlank()) ? topic.trim() : null;
+
+        MessageTraceDTO dto = new MessageTraceDTO(targetId, targetTopic);
+        List<MessageTraceNodeDTO> nodes = new ArrayList<>();
+
+        try {
+            DefaultMQAdminExt client = ensureStarted();
+            long end = System.currentTimeMillis();
+            long begin = end - 24L * 3600 * 1000;
+            QueryResult qr = client.queryMessage("RMQ_SYS_TRACE_TOPIC", targetId, 32, begin, end);
+            if (qr != null && qr.getMessageList() != null) {
+                for (MessageExt traceMsg : qr.getMessageList()) {
+                    List<TraceView> traceViews = TraceView.decodeFromTraceTransData(targetId, traceMsg);
+                    if (traceViews != null) {
+                        for (TraceView tv : traceViews) {
+                            nodes.add(new MessageTraceNodeDTO(
+                                    tv.getMsgType(),
+                                    tv.getClientHost() != null ? tv.getClientHost() : tv.getStoreHost(),
+                                    tv.getCostTime(),
+                                    tv.getTimeStamp(),
+                                    tv.getStatus(),
+                                    tv.getGroupName()
+                            ));
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.debug("No trace records found in RMQ_SYS_TRACE_TOPIC for {}: {}", targetId, e.getMessage());
+        }
+
+        if (nodes.isEmpty() && targetTopic != null) {
+            try {
+                MessageDetailDTO msg = queryMessageById(targetId, targetTopic);
+                if (msg != null) {
+                    if (msg.getBornTimestamp() > 0) {
+                        nodes.add(new MessageTraceNodeDTO("Pub", msg.getBornHost(), 0, msg.getBornTimestamp(), "SUCCESS", null));
+                    }
+                    if (msg.getStoreTimestamp() > 0) {
+                        int storeCost = (int) Math.max(0, msg.getStoreTimestamp() - msg.getBornTimestamp());
+                        nodes.add(new MessageTraceNodeDTO("Broker", msg.getStoreHost(), storeCost, msg.getStoreTimestamp(), "SUCCESS", null));
+                    }
+                }
+            } catch (Exception e) {
+                log.debug("Fallback message lookup failed for trace {}: {}", targetId, e.getMessage());
+            }
+        }
+
+        nodes.sort((a, b) -> Long.compare(a.getTimestamp(), b.getTimestamp()));
+        dto.setNodes(nodes);
+        return dto;
     }
 
     /**

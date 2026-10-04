@@ -6,11 +6,17 @@ import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ClusterInfoDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerConnectionDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerGroupListDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerLagDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.DlqMessageListDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.MessageDetailDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.MessageListDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.MessageTraceDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopConsumerLagDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicListDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicOverviewDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicRouteDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicStatusDTO;
+import org.apache.rocketmq.client.QueryResult;
+import org.apache.rocketmq.common.message.MessageExt;
 import org.apache.rocketmq.remoting.protocol.admin.ConsumeStats;
 import org.apache.rocketmq.remoting.protocol.admin.OffsetWrapper;
 import org.apache.rocketmq.remoting.protocol.admin.TopicOffset;
@@ -35,6 +41,8 @@ import org.apache.rocketmq.tools.admin.DefaultMQAdminExt;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.concurrent.ConcurrentHashMap;
@@ -44,6 +52,10 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -532,6 +544,181 @@ class DefaultAdminClientServiceTest {
         assertThatThrownBy(() -> service.getConsumerStatus("   "))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> service.getConsumerLag(null, "TestTopic"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("验证根据主题与消息 ID 成功检索消息明细")
+    void shouldQueryMessageByIdWithTopic() throws Exception {
+        RocketmqProperties properties = new RocketmqProperties();
+        DefaultMQAdminExt mockClient = mock(DefaultMQAdminExt.class);
+        TestableAdminClientService service = new TestableAdminClientService(properties, mockClient);
+
+        MessageExt msg = new MessageExt();
+        msg.setTopic("OrderTopic");
+        msg.setMsgId("0A00000100002A9F0000000000000001");
+        msg.setTags("TagA");
+        msg.setKeys("ORDER_1001");
+        msg.setQueueId(1);
+        msg.setQueueOffset(100L);
+        msg.setBornHost(new InetSocketAddress("127.0.0.1", 10911));
+        msg.setStoreHost(new InetSocketAddress("127.0.0.1", 10911));
+        msg.setBornTimestamp(1700000000000L);
+        msg.setStoreTimestamp(1700000001000L);
+        msg.setReconsumeTimes(0);
+        msg.setBody("hello rocketmq".getBytes(StandardCharsets.UTF_8));
+
+        when(mockClient.viewMessage("OrderTopic", "0A00000100002A9F0000000000000001")).thenReturn(msg);
+
+        MessageDetailDTO dto = service.queryMessageById("0A00000100002A9F0000000000000001", "OrderTopic");
+
+        assertThat(dto).isNotNull();
+        assertThat(dto.getMsgId()).isEqualTo("0A00000100002A9F0000000000000001");
+        assertThat(dto.getTopic()).isEqualTo("OrderTopic");
+        assertThat(dto.getTags()).isEqualTo("TagA");
+        assertThat(dto.getKeys()).isEqualTo("ORDER_1001");
+        assertThat(dto.getQueueId()).isEqualTo(1);
+        assertThat(dto.getBody()).isEqualTo("hello rocketmq");
+        assertThat(dto.isTruncated()).isFalse();
+    }
+
+    @Test
+    @DisplayName("验证仅根据消息 ID (不带 Topic) 检索消息明细，自动扫描业务主题")
+    void shouldQueryMessageByIdWithoutTopic() throws Exception {
+        RocketmqProperties properties = new RocketmqProperties();
+        DefaultMQAdminExt mockClient = mock(DefaultMQAdminExt.class);
+        TestableAdminClientService service = new TestableAdminClientService(properties, mockClient);
+
+        MessageExt msg = new MessageExt();
+        msg.setTopic("DefaultTopic");
+        msg.setMsgId("0A00000100002A9F0000000000000002");
+        msg.setQueueId(0);
+        msg.setQueueOffset(50L);
+        msg.setBornTimestamp(1700000000000L);
+        msg.setStoreTimestamp(1700000001000L);
+        msg.setBody("test payload".getBytes(StandardCharsets.UTF_8));
+
+        org.apache.rocketmq.remoting.protocol.body.TopicList topicList = new org.apache.rocketmq.remoting.protocol.body.TopicList();
+        topicList.setTopicList(new java.util.HashSet<>(List.of("DefaultTopic")));
+        when(mockClient.fetchAllTopicList()).thenReturn(topicList);
+        when(mockClient.viewMessage("DefaultTopic", "0A00000100002A9F0000000000000002")).thenReturn(msg);
+
+        MessageDetailDTO dto = service.queryMessageById("0A00000100002A9F0000000000000002", null);
+
+        assertThat(dto).isNotNull();
+        assertThat(dto.getMsgId()).isEqualTo("0A00000100002A9F0000000000000002");
+        assertThat(dto.getTopic()).isEqualTo("DefaultTopic");
+        assertThat(dto.getBody()).isEqualTo("test payload");
+    }
+
+    @Test
+    @DisplayName("验证根据 Key 检索消息列表成功返回")
+    void shouldQueryMessageByKeySuccessfully() throws Exception {
+        RocketmqProperties properties = new RocketmqProperties();
+        DefaultMQAdminExt mockClient = mock(DefaultMQAdminExt.class);
+        TestableAdminClientService service = new TestableAdminClientService(properties, mockClient);
+
+        MessageExt msg1 = new MessageExt();
+        msg1.setTopic("OrderTopic");
+        msg1.setMsgId("MSG_K_1");
+        msg1.setKeys("ORDER_K");
+        msg1.setQueueId(0);
+        msg1.setQueueOffset(10L);
+        msg1.setBornTimestamp(1700000000000L);
+        msg1.setStoreTimestamp(1700000001000L);
+        msg1.setBody("order-1".getBytes(StandardCharsets.UTF_8));
+
+        QueryResult queryResult = new QueryResult(1700000000000L, List.of(msg1));
+        when(mockClient.queryMessage(anyString(), anyString(), anyInt(), anyLong(), anyLong()))
+                .thenReturn(queryResult);
+
+        MessageListDTO listDto = service.queryMessageByKey("OrderTopic", "ORDER_K", 1000L, 2000L, 10);
+
+        assertThat(listDto).isNotNull();
+        assertThat(listDto.getTotalCount()).isEqualTo(1);
+        assertThat(listDto.getMessages().get(0).getKeys()).isEqualTo("ORDER_K");
+    }
+
+    @Test
+    @DisplayName("验证查询死信队列消息列表成功返回")
+    void shouldQueryDlqMessagesSuccessfully() throws Exception {
+        RocketmqProperties properties = new RocketmqProperties();
+        DefaultMQAdminExt mockClient = mock(DefaultMQAdminExt.class);
+        TestableAdminClientService service = new TestableAdminClientService(properties, mockClient);
+
+        MessageExt dlqMsg = new MessageExt();
+        dlqMsg.setTopic("%DLQ%TestGroup");
+        dlqMsg.setMsgId("DLQ_001");
+        dlqMsg.setKeys("FAIL_KEY");
+        dlqMsg.setQueueId(0);
+        dlqMsg.setQueueOffset(5L);
+        dlqMsg.setBornTimestamp(1700000000000L);
+        dlqMsg.setStoreTimestamp(1700000001000L);
+        dlqMsg.setReconsumeTimes(16);
+        dlqMsg.setBody("dead message payload".getBytes(StandardCharsets.UTF_8));
+
+        QueryResult queryResult = new QueryResult(1700000000000L, List.of(dlqMsg));
+        when(mockClient.queryMessage(anyString(), anyString(), anyInt(), anyLong(), anyLong()))
+                .thenReturn(queryResult);
+
+        DlqMessageListDTO dlqDto = service.queryDlqMessages("TestGroup", null, null, null);
+
+        assertThat(dlqDto).isNotNull();
+        assertThat(dlqDto.getConsumerGroup()).isEqualTo("TestGroup");
+        assertThat(dlqDto.getDlqTopic()).isEqualTo("%DLQ%TestGroup");
+        assertThat(dlqDto.getTotalCount()).isEqualTo(1);
+        assertThat(dlqDto.getMessages().get(0).getReconsumeTimes()).isEqualTo(16);
+    }
+
+    @Test
+    @DisplayName("验证查询消息生命周期轨迹，在无轨迹主题时降级返回发送与存储节点")
+    void shouldQueryMessageTraceWithFallback() throws Exception {
+        RocketmqProperties properties = new RocketmqProperties();
+        DefaultMQAdminExt mockClient = mock(DefaultMQAdminExt.class);
+        TestableAdminClientService service = new TestableAdminClientService(properties, mockClient);
+
+        MessageExt msg = new MessageExt();
+        msg.setTopic("OrderTopic");
+        msg.setMsgId("MSG_TRACE_001");
+        msg.setKeys("ORDER_T");
+        msg.setBornHost(new InetSocketAddress("192.168.1.100", 50000));
+        msg.setStoreHost(new InetSocketAddress("192.168.1.10", 10911));
+        msg.setBornTimestamp(1700000000000L);
+        msg.setStoreTimestamp(1700000001000L);
+        msg.setBody("trace payload".getBytes(StandardCharsets.UTF_8));
+
+        when(mockClient.viewMessage("OrderTopic", "MSG_TRACE_001")).thenReturn(msg);
+        // 系统轨迹主题抛出异常或查询无结果，模拟无 RMQ_SYS_TRACE_TOPIC
+        when(mockClient.queryMessage(org.mockito.ArgumentMatchers.eq("RMQ_SYS_TRACE_TOPIC"), anyString(), anyInt(), anyLong(), anyLong()))
+                .thenThrow(new RuntimeException("Trace topic not found"));
+
+        MessageTraceDTO traceDto = service.queryMessageTrace("MSG_TRACE_001", "OrderTopic");
+
+        assertThat(traceDto).isNotNull();
+        assertThat(traceDto.getMsgId()).isEqualTo("MSG_TRACE_001");
+        assertThat(traceDto.getTopic()).isEqualTo("OrderTopic");
+        // 应该降级包含 Pub 与 Broker 两个节点
+        assertThat(traceDto.getTraceNodes()).hasSize(2);
+        assertThat(traceDto.getTraceNodes().get(0).getNodeType()).isEqualTo("Pub");
+        assertThat(traceDto.getTraceNodes().get(1).getNodeType()).isEqualTo("Broker");
+    }
+
+    @Test
+    @DisplayName("验证消息查询入参空白时抛出非法参数异常")
+    void shouldThrowExceptionWhenMessageParamsAreBlank() {
+        RocketmqProperties properties = new RocketmqProperties();
+        DefaultMQAdminExt mockClient = mock(DefaultMQAdminExt.class);
+        TestableAdminClientService service = new TestableAdminClientService(properties, mockClient);
+
+        assertThatThrownBy(() -> service.queryMessageById("  ", null))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.queryMessageByKey(" ", "key", null, null, null))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.queryMessageByKey("Topic", null, null, null, null))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.queryDlqMessages("  ", null, null, null))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.queryMessageTrace(null, null))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 

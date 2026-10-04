@@ -5,6 +5,7 @@ import com.ateng.mcp.rocketmq.mcp.resource.ServerResources;
 import com.ateng.mcp.rocketmq.mcp.resource.TopicResources;
 import com.ateng.mcp.rocketmq.mcp.tool.ClusterTools;
 import com.ateng.mcp.rocketmq.mcp.tool.ConsumerTools;
+import com.ateng.mcp.rocketmq.mcp.tool.MessageTools;
 import com.ateng.mcp.rocketmq.mcp.tool.TopicTools;
 import com.ateng.mcp.rocketmq.rocketmq.admin.AdminClientService;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.BrokerStatsDTO;
@@ -14,6 +15,10 @@ import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerConnectionDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerGroupListDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerLagDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerLagSummaryDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.DlqMessageListDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.MessageDetailDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.MessageListDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.MessageTraceDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopConsumerLagDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicListDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicOverviewDTO;
@@ -55,6 +60,9 @@ class McpServerRocketmqApplicationTests {
 
     @Autowired
     private ConsumerTools consumerTools;
+
+    @Autowired
+    private MessageTools messageTools;
 
     @Autowired
     private ServerResources serverResources;
@@ -170,6 +178,55 @@ class McpServerRocketmqApplicationTests {
     }
 
     @Test
+    @DisplayName("验证 Spring 上下文成功装配 MessageTools 并执行端到端消息工具回调")
+    void shouldExecuteMessageToolsCallback() throws Exception {
+        MessageDetailDTO mockMsg = new MessageDetailDTO(
+                "MSG_INT_01",
+                "MSG_OFFSET_INT_01",
+                "OrderTopic",
+                "TagA",
+                "KEY_INT",
+                0,
+                10L,
+                "127.0.0.1:10911",
+                1700000000000L,
+                1700000001000L,
+                0,
+                16,
+                "integration body",
+                false,
+                Map.of()
+        );
+        when(adminClientService.queryMessageById("MSG_INT_01", "OrderTopic")).thenReturn(mockMsg);
+
+        MessageDetailDTO idResult = messageTools.queryMessageById("MSG_INT_01", "OrderTopic");
+        assertThat(idResult).isNotNull();
+        assertThat(idResult.getMsgId()).isEqualTo("MSG_INT_01");
+
+        MessageListDTO mockList = new MessageListDTO(List.of(mockMsg));
+        when(adminClientService.queryMessageByKey("OrderTopic", "KEY_INT", null, null, null))
+                .thenReturn(mockList);
+
+        MessageListDTO keyResult = messageTools.queryMessageByKey("OrderTopic", "KEY_INT", null, null, null);
+        assertThat(keyResult).isNotNull();
+        assertThat(keyResult.getTotalCount()).isEqualTo(1);
+
+        DlqMessageListDTO mockDlq = new DlqMessageListDTO("groupA", "%DLQ%groupA", List.of(mockMsg));
+        when(adminClientService.queryDlqMessages("groupA", null, null, null)).thenReturn(mockDlq);
+
+        DlqMessageListDTO dlqResult = messageTools.queryDlqMessages("groupA", null, null, null);
+        assertThat(dlqResult).isNotNull();
+        assertThat(dlqResult.getDlqTopic()).isEqualTo("%DLQ%groupA");
+
+        MessageTraceDTO mockTrace = new MessageTraceDTO("MSG_INT_01", "OrderTopic", List.of());
+        when(adminClientService.queryMessageTrace("MSG_INT_01", null)).thenReturn(mockTrace);
+
+        MessageTraceDTO traceResult = messageTools.queryMessageTrace("MSG_INT_01", null);
+        assertThat(traceResult).isNotNull();
+        assertThat(traceResult.getMsgId()).isEqualTo("MSG_INT_01");
+    }
+
+    @Test
     @DisplayName("验证 ServerResources 与 ClusterResources 可在集成上下文中输出格式化 JSON 状态与拓扑")
     void shouldReadResourcesSuccessfully() throws Exception {
         String statusJson = serverResources.getServerStatus();
@@ -187,12 +244,12 @@ class McpServerRocketmqApplicationTests {
     }
 
     @Test
-    @DisplayName("验证 Spring AI MCP 框架自动扫描并注册 9 项 Tools 与 3 项 Resources 至分发层")
+    @DisplayName("验证 Spring AI MCP 框架自动扫描并注册 13 项 Tools 与 3 项 Resources 至分发层")
     void shouldRegisterMcpToolsAndResourcesWithSpringAi() {
         assertThat(mcpSyncServer).isNotNull();
 
         List<McpSchema.Tool> tools = mcpSyncServer.listTools();
-        assertThat(tools).isNotNull().hasSizeGreaterThanOrEqualTo(9);
+        assertThat(tools).isNotNull().hasSizeGreaterThanOrEqualTo(13);
         assertThat(tools).anyMatch(tool -> "rocketmq_cluster_info".equals(tool.name()));
         assertThat(tools).anyMatch(tool -> "rocketmq_broker_stats".equals(tool.name()));
         assertThat(tools).anyMatch(tool -> "rocketmq_list_topics".equals(tool.name()));
@@ -202,6 +259,10 @@ class McpServerRocketmqApplicationTests {
         assertThat(tools).anyMatch(tool -> "rocketmq_consumer_status".equals(tool.name()));
         assertThat(tools).anyMatch(tool -> "rocketmq_consumer_lag".equals(tool.name()));
         assertThat(tools).anyMatch(tool -> "rocketmq_top_consumer_lag".equals(tool.name()));
+        assertThat(tools).anyMatch(tool -> "rocketmq_query_message_by_id".equals(tool.name()));
+        assertThat(tools).anyMatch(tool -> "rocketmq_query_message_by_key".equals(tool.name()));
+        assertThat(tools).anyMatch(tool -> "rocketmq_query_dlq_messages".equals(tool.name()));
+        assertThat(tools).anyMatch(tool -> "rocketmq_query_message_trace".equals(tool.name()));
 
         List<McpSchema.Resource> resources = mcpSyncServer.listResources();
         assertThat(resources).isNotNull().hasSizeGreaterThanOrEqualTo(3);

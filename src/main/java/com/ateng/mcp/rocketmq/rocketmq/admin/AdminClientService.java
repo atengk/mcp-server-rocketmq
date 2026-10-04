@@ -5,6 +5,10 @@ import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ClusterInfoDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerConnectionDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerGroupListDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerLagDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.DlqMessageListDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.MessageDetailDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.MessageListDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.MessageTraceDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopConsumerLagDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicListDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicOverviewDTO;
@@ -118,6 +122,51 @@ public interface AdminClientService {
      * @throws Exception 当底层通信或计算异常时抛出
      */
     TopConsumerLagDTO getTopConsumerLag(int topN) throws Exception;
+
+    /**
+     * 根据消息 ID 精确查询消息全景属性与消息体内容（受防爆截断保护）。
+     *
+     * @param msgId 消息全局唯一标识 ID（必填）
+     * @param topic 主题名称（建议提供以提升检索效率，可选）
+     * @return 格式化后的 MessageDetailDTO 实例
+     * @throws Exception 当底层通信或查询异常时抛出
+     */
+    MessageDetailDTO queryMessageById(String msgId, String topic) throws Exception;
+
+    /**
+     * 根据业务索引 Key 在指定时间窗口内扫描并检索消息列表。
+     *
+     * @param topic 目标主题名称（必填）
+     * @param key 业务索引 Key（必填）
+     * @param beginTimestamp 开始时间戳（毫秒，可选）
+     * @param endTimestamp 结束时间戳（毫秒，可选）
+     * @param maxNum 最大返回条数（可选，默认为 32）
+     * @return 格式化后的 MessageListDTO 实例
+     * @throws Exception 当底层通信或查询异常时抛出
+     */
+    MessageListDTO queryMessageByKey(String topic, String key, Long beginTimestamp, Long endTimestamp, Integer maxNum) throws Exception;
+
+    /**
+     * 查询指定消费组死信队列（%DLQ%consumerGroup）中的堆积消息。
+     *
+     * @param consumerGroup 消费组名称（必填）
+     * @param beginTimestamp 开始时间戳（毫秒，可选）
+     * @param endTimestamp 结束时间戳（毫秒，可选）
+     * @param maxNum 最大返回条数（可选，默认为 32）
+     * @return 格式化后的 DlqMessageListDTO 实例
+     * @throws Exception 当底层通信或查询异常时抛出
+     */
+    DlqMessageListDTO queryDlqMessages(String consumerGroup, Long beginTimestamp, Long endTimestamp, Integer maxNum) throws Exception;
+
+    /**
+     * 调阅指定消息在全生命周期中的投递轨迹时间线与耗时。
+     *
+     * @param msgId 消息唯一标识 ID（必填）
+     * @param topic 主题名称（可选）
+     * @return 格式化后的 MessageTraceDTO 实例
+     * @throws Exception 当底层通信或查询异常时抛出
+     */
+    MessageTraceDTO queryMessageTrace(String msgId, String topic) throws Exception;
 
     /**
      * 获取受管的 DefaultMQAdminExt 单例实例。
