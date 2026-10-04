@@ -2,11 +2,17 @@ package com.ateng.mcp.rocketmq;
 
 import com.ateng.mcp.rocketmq.mcp.resource.ClusterResources;
 import com.ateng.mcp.rocketmq.mcp.resource.ServerResources;
+import com.ateng.mcp.rocketmq.mcp.resource.TopicResources;
 import com.ateng.mcp.rocketmq.mcp.tool.ClusterTools;
+import com.ateng.mcp.rocketmq.mcp.tool.TopicTools;
 import com.ateng.mcp.rocketmq.rocketmq.admin.AdminClientService;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.BrokerStatsDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.BrokerSummaryDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ClusterInfoDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicListDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicOverviewDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicRouteDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicStatusDTO;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.junit.jupiter.api.DisplayName;
@@ -39,10 +45,16 @@ class McpServerRocketmqApplicationTests {
     private ClusterTools clusterTools;
 
     @Autowired
+    private TopicTools topicTools;
+
+    @Autowired
     private ServerResources serverResources;
 
     @Autowired
     private ClusterResources clusterResources;
+
+    @Autowired
+    private TopicResources topicResources;
 
     @Autowired
     private McpSyncServer mcpSyncServer;
@@ -79,6 +91,40 @@ class McpServerRocketmqApplicationTests {
     }
 
     @Test
+    @DisplayName("验证 Spring 上下文成功装配 TopicTools 与 TopicResources 并执行端到端回调")
+    void shouldExecuteTopicToolsAndResourcesCallback() throws Exception {
+        TopicListDTO mockTopicList = new TopicListDTO(List.of("CartTopic"));
+        when(adminClientService.listTopics(false)).thenReturn(mockTopicList);
+
+        TopicListDTO listResult = topicTools.listTopics(false);
+        assertThat(listResult).isNotNull();
+        assertThat(listResult.getTopics()).containsExactly("CartTopic");
+
+        TopicRouteDTO mockRoute = new TopicRouteDTO("CartTopic");
+        when(adminClientService.getTopicRoute("CartTopic")).thenReturn(mockRoute);
+
+        TopicRouteDTO routeResult = topicTools.getTopicRoute("CartTopic");
+        assertThat(routeResult).isNotNull();
+        assertThat(routeResult.getTopic()).isEqualTo("CartTopic");
+
+        TopicStatusDTO mockStatus = new TopicStatusDTO("CartTopic");
+        mockStatus.setTotalMessages(999L);
+        when(adminClientService.getTopicStatus("CartTopic")).thenReturn(mockStatus);
+
+        TopicStatusDTO statusResult = topicTools.getTopicStatus("CartTopic");
+        assertThat(statusResult).isNotNull();
+        assertThat(statusResult.getTotalMessages()).isEqualTo(999L);
+
+        TopicOverviewDTO.TopicSummaryDTO summary = new TopicOverviewDTO.TopicSummaryDTO("CartTopic", 8, 8, List.of("broker-0"));
+        when(adminClientService.getTopicsOverview()).thenReturn(new TopicOverviewDTO(List.of(summary)));
+
+        String overviewJson = topicResources.getTopicsOverview();
+        assertThat(overviewJson).isNotBlank();
+        assertThat(overviewJson).contains("\"CartTopic\"");
+        assertThat(overviewJson).contains("\"totalReadQueues\":8");
+    }
+
+    @Test
     @DisplayName("验证 ServerResources 与 ClusterResources 可在集成上下文中输出格式化 JSON 状态与拓扑")
     void shouldReadResourcesSuccessfully() throws Exception {
         String statusJson = serverResources.getServerStatus();
@@ -96,18 +142,22 @@ class McpServerRocketmqApplicationTests {
     }
 
     @Test
-    @DisplayName("验证 Spring AI MCP 框架自动扫描并注册 2 项 Tools 与 2 项 Resources 至分发层")
+    @DisplayName("验证 Spring AI MCP 框架自动扫描并注册 5 项 Tools 与 3 项 Resources 至分发层")
     void shouldRegisterMcpToolsAndResourcesWithSpringAi() {
         assertThat(mcpSyncServer).isNotNull();
 
         List<McpSchema.Tool> tools = mcpSyncServer.listTools();
-        assertThat(tools).isNotNull().hasSizeGreaterThanOrEqualTo(2);
+        assertThat(tools).isNotNull().hasSizeGreaterThanOrEqualTo(5);
         assertThat(tools).anyMatch(tool -> "rocketmq_cluster_info".equals(tool.name()));
         assertThat(tools).anyMatch(tool -> "rocketmq_broker_stats".equals(tool.name()));
+        assertThat(tools).anyMatch(tool -> "rocketmq_list_topics".equals(tool.name()));
+        assertThat(tools).anyMatch(tool -> "rocketmq_topic_route".equals(tool.name()));
+        assertThat(tools).anyMatch(tool -> "rocketmq_topic_status".equals(tool.name()));
 
         List<McpSchema.Resource> resources = mcpSyncServer.listResources();
-        assertThat(resources).isNotNull().hasSizeGreaterThanOrEqualTo(2);
+        assertThat(resources).isNotNull().hasSizeGreaterThanOrEqualTo(3);
         assertThat(resources).anyMatch(resource -> "rocketmq://server/status".equals(resource.uri()));
         assertThat(resources).anyMatch(resource -> "rocketmq://cluster/topology".equals(resource.uri()));
+        assertThat(resources).anyMatch(resource -> "rocketmq://topics".equals(resource.uri()));
     }
 }

@@ -8,6 +8,8 @@ import org.springframework.ai.mcp.annotation.McpResource;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.util.Map;
+
 /**
  * 集群物理拓扑只读资源暴露组件。
  * 提供 rocketmq://cluster/topology 资源，供 AI 宿主无需工具调用直接挂载物理集群主从拓扑快照。
@@ -44,8 +46,12 @@ public class ClusterResources {
             return jsonMapper.writeValueAsString(clusterInfo);
         } catch (Exception e) {
             log.error("Failed to read cluster topology resource: {}", e.getMessage());
-            String errorMsg = e.getMessage() != null ? e.getMessage().replace("\"", "'") : e.getClass().getSimpleName();
-            return "{\"error\":\"" + errorMsg + "\"}";
+            String errorMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            try {
+                return jsonMapper.writeValueAsString(Map.of("error", errorMsg));
+            } catch (Exception ex) {
+                return "{\"error\":\"" + errorMsg.replace("\"", "'") + "\"}";
+            }
         }
     }
 }

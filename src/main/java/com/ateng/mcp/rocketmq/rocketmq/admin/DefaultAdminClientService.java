@@ -4,12 +4,26 @@ import com.ateng.mcp.rocketmq.config.RocketmqProperties;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.BrokerStatsDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.BrokerSummaryDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ClusterInfoDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.QueueDataDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicListDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicOverviewDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicQueueOffsetDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicRouteDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicStatusDTO;
+import com.ateng.mcp.rocketmq.rocketmq.util.TopicFilterUtils;
+import java.util.LinkedHashSet;
+import org.apache.rocketmq.common.message.MessageQueue;
 import org.apache.rocketmq.remoting.exception.RemotingConnectException;
 import org.apache.rocketmq.remoting.exception.RemotingSendRequestException;
 import org.apache.rocketmq.remoting.exception.RemotingTimeoutException;
+import org.apache.rocketmq.remoting.protocol.admin.TopicOffset;
+import org.apache.rocketmq.remoting.protocol.admin.TopicStatsTable;
 import org.apache.rocketmq.remoting.protocol.body.ClusterInfo;
 import org.apache.rocketmq.remoting.protocol.body.KVTable;
+import org.apache.rocketmq.remoting.protocol.body.TopicList;
 import org.apache.rocketmq.remoting.protocol.route.BrokerData;
+import org.apache.rocketmq.remoting.protocol.route.QueueData;
+import org.apache.rocketmq.remoting.protocol.route.TopicRouteData;
 import org.apache.rocketmq.tools.admin.DefaultMQAdminExt;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,10 +37,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * RocketMQ 运维管理客户端服务默认实现。
- * 负责管理 DefaultMQAdminExt 单例生命周期、自愈重连并提供对集群底层元数据与指标的安全转换访问。
+ * 负责管理 DefaultMQAdminExt 单例生命周期、自愈重连并提供对集群底层元数据、指标与主题感知的安全转换访问。
  *
  * @author Ateng
  * @since 2026-10-04
@@ -208,6 +223,196 @@ public class DefaultAdminClientService implements AdminClientService, Initializi
             }
         }
         return dto;
+    }
+
+    @Override
+    public TopicListDTO listTopics(boolean includeSystem) throws Exception {
+        TopicList topicList;
+        try {
+            DefaultMQAdminExt client = ensureStarted();
+            topicList = client.fetchAllTopicList();
+        } catch (RemotingConnectException | RemotingTimeoutException | RemotingSendRequestException e) {
+            log.warn("Connection lost when fetching topic list. Triggering self-healing reconnect: {}", e.getMessage());
+            reconnect();
+            DefaultMQAdminExt client = ensureStarted();
+            topicList = client.fetchAllTopicList();
+        }
+
+        if (topicList == null || topicList.getTopicList() == null || topicList.getTopicList().isEmpty()) {
+            return new TopicListDTO(Collections.emptyList());
+        }
+
+        Set<String> rawTopics = topicList.getTopicList();
+        List<String> resultList;
+        if (includeSystem) {
+            resultList = rawTopics.stream()
+                    .filter(t -> t != null && !t.isBlank())
+                    .sorted()
+                    .collect(Collectors.toList());
+        } else {
+            resultList = TopicFilterUtils.filterBusinessTopics(rawTopics);
+        }
+
+        return new TopicListDTO(resultList);
+    }
+
+    @Override
+    public TopicRouteDTO getTopicRoute(String topic) throws Exception {
+        if (topic == null || topic.isBlank()) {
+            throw new IllegalArgumentException("topic 不能为空");
+        }
+
+        TopicRouteData routeData;
+        try {
+            DefaultMQAdminExt client = ensureStarted();
+            routeData = client.examineTopicRouteInfo(topic.trim());
+        } catch (RemotingConnectException | RemotingTimeoutException | RemotingSendRequestException e) {
+            log.warn("Connection lost when examining topic route for {}. Triggering self-healing reconnect: {}", topic, e.getMessage());
+            reconnect();
+            DefaultMQAdminExt client = ensureStarted();
+            routeData = client.examineTopicRouteInfo(topic.trim());
+        }
+
+        TopicRouteDTO dto = new TopicRouteDTO(topic.trim());
+        if (routeData == null) {
+            return dto;
+        }
+
+        // 1. 映射 QueueData
+        if (routeData.getQueueDatas() != null) {
+            List<QueueDataDTO> queueList = new ArrayList<>();
+            for (QueueData qd : routeData.getQueueDatas()) {
+                if (qd != null) {
+                    queueList.add(new QueueDataDTO(
+                            qd.getBrokerName(),
+                            qd.getReadQueueNums(),
+                            qd.getWriteQueueNums(),
+                            qd.getPerm()
+                    ));
+                }
+            }
+            dto.setQueueDatas(queueList);
+        }
+
+        // 2. 映射 BrokerData
+        if (routeData.getBrokerDatas() != null) {
+            List<BrokerSummaryDTO> brokerList = new ArrayList<>();
+            for (BrokerData bd : routeData.getBrokerDatas()) {
+                if (bd != null && bd.getBrokerAddrs() != null) {
+                    for (Map.Entry<Long, String> entry : bd.getBrokerAddrs().entrySet()) {
+                        Long brokerId = entry.getKey();
+                        String role = (brokerId != null && brokerId == 0L) ? "MASTER" : "SLAVE";
+                        brokerList.add(new BrokerSummaryDTO(
+                                bd.getBrokerName(),
+                                bd.getCluster(),
+                                brokerId,
+                                role,
+                                entry.getValue(),
+                                null
+                        ));
+                    }
+                }
+            }
+            dto.setBrokerDatas(brokerList);
+        }
+
+        return dto;
+    }
+
+    @Override
+    public TopicStatusDTO getTopicStatus(String topic) throws Exception {
+        if (topic == null || topic.isBlank()) {
+            throw new IllegalArgumentException("topic 不能为空");
+        }
+
+        TopicStatsTable statsTable;
+        try {
+            DefaultMQAdminExt client = ensureStarted();
+            statsTable = client.examineTopicStats(topic.trim());
+        } catch (RemotingConnectException | RemotingTimeoutException | RemotingSendRequestException e) {
+            log.warn("Connection lost when examining topic stats for {}. Triggering self-healing reconnect: {}", topic, e.getMessage());
+            reconnect();
+            DefaultMQAdminExt client = ensureStarted();
+            statsTable = client.examineTopicStats(topic.trim());
+        }
+
+        TopicStatusDTO dto = new TopicStatusDTO(topic.trim());
+        if (statsTable == null || statsTable.getOffsetTable() == null || statsTable.getOffsetTable().isEmpty()) {
+            return dto;
+        }
+
+        List<TopicQueueOffsetDTO> queueOffsets = new ArrayList<>();
+        long totalMessages = 0;
+        long globalMin = Long.MAX_VALUE;
+        long globalMax = 0;
+
+        for (Map.Entry<MessageQueue, TopicOffset> entry : statsTable.getOffsetTable().entrySet()) {
+            MessageQueue mq = entry.getKey();
+            TopicOffset offset = entry.getValue();
+            if (mq == null || offset == null) {
+                continue;
+            }
+
+            long minOffset = offset.getMinOffset();
+            long maxOffset = offset.getMaxOffset();
+            long count = Math.max(0, maxOffset - minOffset);
+            totalMessages += count;
+
+            if (minOffset < globalMin) {
+                globalMin = minOffset;
+            }
+            if (maxOffset > globalMax) {
+                globalMax = maxOffset;
+            }
+
+            queueOffsets.add(new TopicQueueOffsetDTO(
+                    mq.getBrokerName(),
+                    mq.getQueueId(),
+                    minOffset,
+                    maxOffset,
+                    offset.getLastUpdateTimestamp()
+            ));
+        }
+
+        dto.setQueues(queueOffsets);
+        dto.setTotalMessages(totalMessages);
+        dto.setMinOffset(globalMin == Long.MAX_VALUE ? 0 : globalMin);
+        dto.setMaxOffset(globalMax);
+
+        return dto;
+    }
+
+    @Override
+    public TopicOverviewDTO getTopicsOverview() throws Exception {
+        TopicListDTO topicListDTO = listTopics(false);
+        List<TopicOverviewDTO.TopicSummaryDTO> summaries = new ArrayList<>();
+        for (String topic : topicListDTO.getTopics()) {
+            if (topic == null || topic.isBlank()) {
+                continue;
+            }
+            try {
+                TopicRouteDTO route = getTopicRoute(topic);
+                int totalRead = 0;
+                int totalWrite = 0;
+                Set<String> brokerSet = new LinkedHashSet<>();
+                if (route != null && route.getQueueDatas() != null) {
+                    for (QueueDataDTO qd : route.getQueueDatas()) {
+                        if (qd != null) {
+                            totalRead += qd.getReadQueueNums();
+                            totalWrite += qd.getWriteQueueNums();
+                            if (qd.getBrokerName() != null && !qd.getBrokerName().isBlank()) {
+                                brokerSet.add(qd.getBrokerName());
+                            }
+                        }
+                    }
+                }
+                summaries.add(new TopicOverviewDTO.TopicSummaryDTO(topic, totalRead, totalWrite, new ArrayList<>(brokerSet)));
+            } catch (Exception e) {
+                log.warn("Failed to fetch route for topic {} when building overview: {}", topic, e.getMessage());
+                summaries.add(new TopicOverviewDTO.TopicSummaryDTO(topic, 0, 0, Collections.emptyList()));
+            }
+        }
+        return new TopicOverviewDTO(summaries);
     }
 
     /**

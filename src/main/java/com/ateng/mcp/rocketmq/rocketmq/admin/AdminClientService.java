@@ -2,6 +2,10 @@ package com.ateng.mcp.rocketmq.rocketmq.admin;
 
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.BrokerStatsDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ClusterInfoDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicListDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicOverviewDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicRouteDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicStatusDTO;
 import org.apache.rocketmq.remoting.protocol.body.ClusterInfo;
 import org.apache.rocketmq.tools.admin.DefaultMQAdminExt;
 
@@ -38,6 +42,41 @@ public interface AdminClientService {
      * @throws Exception 当底层通信或指标提取异常时抛出
      */
     BrokerStatsDTO getBrokerStats(String brokerAddr) throws Exception;
+
+    /**
+     * 查询集群主题列表。
+     *
+     * @param includeSystem 是否包含系统内部保留主题（默认应为 false）
+     * @return 格式化后的 TopicListDTO 实例
+     * @throws Exception 当底层通信或查询异常时抛出
+     */
+    TopicListDTO listTopics(boolean includeSystem) throws Exception;
+
+    /**
+     * 查询指定主题的读写队列分布与 Broker 路由详情。
+     *
+     * @param topic 主题名称
+     * @return 格式化后的 TopicRouteDTO 实例
+     * @throws Exception 当底层通信或路由查询异常时抛出
+     */
+    TopicRouteDTO getTopicRoute(String topic) throws Exception;
+
+    /**
+     * 查询指定主题各分片队列的位点统计与消息留存容量。
+     *
+     * @param topic 主题名称
+     * @return 格式化后的 TopicStatusDTO 实例
+     * @throws Exception 当底层通信或位点计算异常时抛出
+     */
+    TopicStatusDTO getTopicStatus(String topic) throws Exception;
+
+    /**
+     * 获取业务主题全景概览，包含业务主题列表、读写队列规模与分布节点。
+     *
+     * @return 格式化后的 TopicOverviewDTO 实例
+     * @throws Exception 当底层通信或查询异常时抛出
+     */
+    TopicOverviewDTO getTopicsOverview() throws Exception;
 
     /**
      * 获取受管的 DefaultMQAdminExt 单例实例。
