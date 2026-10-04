@@ -1,5 +1,6 @@
 package com.ateng.mcp.rocketmq;
 
+import com.ateng.mcp.rocketmq.mcp.prompt.ExpertPrompts;
 import com.ateng.mcp.rocketmq.mcp.resource.ClusterResources;
 import com.ateng.mcp.rocketmq.mcp.resource.ServerResources;
 import com.ateng.mcp.rocketmq.mcp.resource.TopicResources;
@@ -88,6 +89,9 @@ class McpServerRocketmqApplicationTests {
 
     @Autowired
     private TopicResources topicResources;
+
+    @Autowired
+    private ExpertPrompts expertPrompts;
 
     @Autowired
     private RocketmqProperties rocketmqProperties;
@@ -343,7 +347,25 @@ class McpServerRocketmqApplicationTests {
     }
 
     @Test
-    @DisplayName("验证 Spring AI MCP 框架自动扫描并注册完整 18 项 Tools 与 3 项 Resources 至分发层")
+    @DisplayName("验证 ExpertPrompts 专家诊断工作流在集成上下文中可直接生成结构化工作流")
+    void shouldExecuteExpertPromptsDirectly() {
+        McpSchema.GetPromptResult lagResult = expertPrompts.diagnoseConsumerLag("order_group", "OrderTopic");
+        assertThat(lagResult).isNotNull();
+        assertThat(lagResult.messages()).isNotEmpty();
+        String lagText = ((McpSchema.TextContent) lagResult.messages().getFirst().content()).text();
+        assertThat(lagText).contains("order_group");
+        assertThat(lagText).contains("rocketmq_consumer_lag");
+
+        McpSchema.GetPromptResult healthResult = expertPrompts.clusterHealthCheck(5);
+        assertThat(healthResult).isNotNull();
+        assertThat(healthResult.messages()).isNotEmpty();
+        String healthText = ((McpSchema.TextContent) healthResult.messages().getFirst().content()).text();
+        assertThat(healthText).contains("rocketmq_cluster_info");
+        assertThat(healthText).contains("Top 5");
+    }
+
+    @Test
+    @DisplayName("验证 Spring AI MCP 框架自动扫描并注册完整 18 项 Tools、3 项 Resources 与 2 项 Prompts 至分发层")
     void shouldRegisterMcpToolsAndResourcesWithSpringAi() {
         assertThat(mcpSyncServer).isNotNull();
 
@@ -373,5 +395,10 @@ class McpServerRocketmqApplicationTests {
         assertThat(resources).anyMatch(resource -> "rocketmq://server/status".equals(resource.uri()));
         assertThat(resources).anyMatch(resource -> "rocketmq://cluster/topology".equals(resource.uri()));
         assertThat(resources).anyMatch(resource -> "rocketmq://topics".equals(resource.uri()));
+
+        List<McpSchema.Prompt> prompts = mcpSyncServer.listPrompts();
+        assertThat(prompts).isNotNull().hasSizeGreaterThanOrEqualTo(2);
+        assertThat(prompts).anyMatch(prompt -> "diagnose_consumer_lag".equals(prompt.name()));
+        assertThat(prompts).anyMatch(prompt -> "cluster_health_check".equals(prompt.name()));
     }
 }

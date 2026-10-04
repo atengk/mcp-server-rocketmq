@@ -37,6 +37,21 @@ class StdioEnvironmentPostProcessorTest {
     }
 
     @Test
+    @DisplayName("当环境变量 MCP_TRANSPORT=stdio 时应正确激活 stdio 纯净化模式")
+    void shouldConfigureStdioModeWhenEnvVarSet() {
+        MockEnvironment environment = new MockEnvironment();
+        environment.setProperty("MCP_TRANSPORT", "stdio");
+
+        SpringApplication application = new SpringApplication();
+        processor.postProcessEnvironment(environment, application);
+
+        assertThat(environment.getProperty("spring.ai.mcp.server.stdio")).isEqualTo("true");
+        assertThat(environment.getProperty("CONSOLE_LOG_TARGET")).isEqualTo("System.err");
+        assertThat(environment.getProperty("spring.main.banner-mode")).isEqualTo("off");
+        assertThat(environment.getProperty("spring.main.web-application-type")).isEqualTo("none");
+    }
+
+    @Test
     @DisplayName("当非 stdio 模式时不应强制覆写 stdio 相关属性")
     void shouldNotConfigureStdioModeWhenPropertyNotSet() {
         MockEnvironment environment = new MockEnvironment();
