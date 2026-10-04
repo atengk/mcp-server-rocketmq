@@ -1,0 +1,23 @@
+server:
+  port: ${SERVER_PORT:${PORT:8080}}
+
+spring:
+  application:
+    name: mcp-server-rocketmq
+  ai:
+    mcp:
+      server:
+        name: mcp-server-rocketmq
+        version: 1.0.0
+        protocol: SSE
+        sse:
+          sse-endpoint: /mcp/sse
+          sse-message-endpoint: /mcp/message
+
+rocketmq:
+  namesrv-addr: ${ROCKETMQ_NAMESRV_ADDR:127.0.0.1:9876}
+  endpoints: ${ROCKETMQ_ENDPOINTS:127.0.0.1:8081}
+  access-key: ${ROCKETMQ_ACCESS_KEY:}
+  secret-key: ${ROCKETMQ_SECRET_KEY:}
+  read-only: ${ROCKETMQ_READ_ONLY:false}
+  enable-destructive-tools: ${ROCKETMQ_ENABLE_DESTRUCTIVE_TOOLS:false}
