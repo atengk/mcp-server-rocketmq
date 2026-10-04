@@ -11,6 +11,7 @@ import com.ateng.mcp.rocketmq.mcp.tool.TopicTools;
 import com.ateng.mcp.rocketmq.rocketmq.admin.AdminClientService;
 import com.ateng.mcp.rocketmq.rocketmq.messaging.MessagingClientService;
 import com.ateng.mcp.rocketmq.rocketmq.messaging.dto.SendMessageResultDTO;
+import com.ateng.mcp.rocketmq.config.RocketmqProperties;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.BrokerStatsDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.BrokerSummaryDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ClusterInfoDTO;
@@ -22,11 +23,15 @@ import com.ateng.mcp.rocketmq.rocketmq.admin.dto.DlqMessageListDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.MessageDetailDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.MessageListDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.MessageTraceDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ResendDlqResultDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ResetOffsetResultDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopConsumerLagDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicListDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicOperationResultDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicOverviewDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicRouteDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicStatusDTO;
+import com.ateng.mcp.rocketmq.security.DestructiveOperationBlockedException;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.junit.jupiter.api.DisplayName;
@@ -39,6 +44,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
@@ -82,6 +88,9 @@ class McpServerRocketmqApplicationTests {
 
     @Autowired
     private TopicResources topicResources;
+
+    @Autowired
+    private RocketmqProperties rocketmqProperties;
 
     @Autowired
     private McpSyncServer mcpSyncServer;
@@ -282,25 +291,81 @@ class McpServerRocketmqApplicationTests {
     }
 
     @Test
-    @DisplayName("验证 Spring AI MCP 框架自动扫描并注册 14 项 Tools 与 3 项 Resources 至分发层")
+    @DisplayName("验证 Spring 上下文成功装配控制面生命周期与双层防呆破坏性工具回调")
+    void shouldExecuteDestructiveAndLifecycleToolsCallback() throws Exception {
+        // 1. 验证创建主题正常回调
+        TopicOperationResultDTO createResultMock = new TopicOperationResultDTO("CREATE_TOPIC", "AutoCreatedTopic", "SUCCESS", "ok");
+        when(adminClientService.createTopic("AutoCreatedTopic", 8, 8, 6)).thenReturn(createResultMock);
+
+        TopicOperationResultDTO createResult = topicTools.createTopic("AutoCreatedTopic", 8, 8, 6);
+        assertThat(createResult).isNotNull();
+        assertThat(createResult.getTopic()).isEqualTo("AutoCreatedTopic");
+
+        // 2. 验证默认环境下破坏性操作拦截（第一层防呆生效）
+        assertThatThrownBy(() -> topicTools.deleteTopic("OldTopic", true))
+                .isInstanceOf(DestructiveOperationBlockedException.class);
+        assertThatThrownBy(() -> consumerTools.resetConsumerOffset("groupA", "OrderTopic", null, true, true))
+                .isInstanceOf(DestructiveOperationBlockedException.class);
+        assertThatThrownBy(() -> messageTools.resendDlqMessage("groupA", "DLQ_01", "OrderTopic", true))
+                .isInstanceOf(DestructiveOperationBlockedException.class);
+
+        // 3. 动态激活破坏性开关后验证授权调用
+        rocketmqProperties.setEnableDestructiveTools(true);
+        try {
+            TopicOperationResultDTO deleteResultMock = new TopicOperationResultDTO("DELETE_TOPIC", "OldTopic", "SUCCESS", "deleted");
+            when(adminClientService.deleteTopic("OldTopic")).thenReturn(deleteResultMock);
+            TopicOperationResultDTO deleteResult = topicTools.deleteTopic("OldTopic", true);
+            assertThat(deleteResult).isNotNull();
+            assertThat(deleteResult.getStatus()).isEqualTo("SUCCESS");
+
+            ResetOffsetResultDTO resetResultMock = new ResetOffsetResultDTO("groupA", "OrderTopic", "MAX_OFFSET", 1000L, "SUCCESS", "ok");
+            when(adminClientService.resetOffset("groupA", "OrderTopic", null, true)).thenReturn(resetResultMock);
+            ResetOffsetResultDTO resetResult = consumerTools.resetConsumerOffset("groupA", "OrderTopic", null, true, true);
+            assertThat(resetResult).isNotNull();
+            assertThat(resetResult.getResetMode()).isEqualTo("MAX_OFFSET");
+
+            ResendDlqResultDTO resendResultMock = new ResendDlqResultDTO("groupA", "DLQ_01", "OrderTopic", "NEW_01", "SUCCESS", "ok");
+            when(adminClientService.resendDlqMessage("groupA", "DLQ_01", "OrderTopic")).thenReturn(resendResultMock);
+            ResendDlqResultDTO resendResult = messageTools.resendDlqMessage("groupA", "DLQ_01", "OrderTopic", true);
+            assertThat(resendResult).isNotNull();
+            assertThat(resendResult.getResendMessageId()).isEqualTo("NEW_01");
+
+            // 4. 验证开关开启但 confirm 为 false/null 时拦截（第二层防呆生效）
+            assertThatThrownBy(() -> topicTools.deleteTopic("OldTopic", false))
+                    .isInstanceOf(DestructiveOperationBlockedException.class);
+            assertThatThrownBy(() -> consumerTools.resetConsumerOffset("groupA", "OrderTopic", null, true, false))
+                    .isInstanceOf(DestructiveOperationBlockedException.class);
+            assertThatThrownBy(() -> messageTools.resendDlqMessage("groupA", "DLQ_01", "OrderTopic", null))
+                    .isInstanceOf(DestructiveOperationBlockedException.class);
+        } finally {
+            rocketmqProperties.setEnableDestructiveTools(false);
+        }
+    }
+
+    @Test
+    @DisplayName("验证 Spring AI MCP 框架自动扫描并注册完整 18 项 Tools 与 3 项 Resources 至分发层")
     void shouldRegisterMcpToolsAndResourcesWithSpringAi() {
         assertThat(mcpSyncServer).isNotNull();
 
         List<McpSchema.Tool> tools = mcpSyncServer.listTools();
-        assertThat(tools).isNotNull().hasSizeGreaterThanOrEqualTo(14);
+        assertThat(tools).isNotNull().hasSizeGreaterThanOrEqualTo(18);
         assertThat(tools).anyMatch(tool -> "rocketmq_cluster_info".equals(tool.name()));
         assertThat(tools).anyMatch(tool -> "rocketmq_broker_stats".equals(tool.name()));
         assertThat(tools).anyMatch(tool -> "rocketmq_list_topics".equals(tool.name()));
         assertThat(tools).anyMatch(tool -> "rocketmq_topic_route".equals(tool.name()));
         assertThat(tools).anyMatch(tool -> "rocketmq_topic_status".equals(tool.name()));
+        assertThat(tools).anyMatch(tool -> "rocketmq_create_topic".equals(tool.name()));
+        assertThat(tools).anyMatch(tool -> "rocketmq_delete_topic".equals(tool.name()));
         assertThat(tools).anyMatch(tool -> "rocketmq_list_consumer_groups".equals(tool.name()));
         assertThat(tools).anyMatch(tool -> "rocketmq_consumer_status".equals(tool.name()));
         assertThat(tools).anyMatch(tool -> "rocketmq_consumer_lag".equals(tool.name()));
         assertThat(tools).anyMatch(tool -> "rocketmq_top_consumer_lag".equals(tool.name()));
+        assertThat(tools).anyMatch(tool -> "rocketmq_reset_consumer_offset".equals(tool.name()));
         assertThat(tools).anyMatch(tool -> "rocketmq_query_message_by_id".equals(tool.name()));
         assertThat(tools).anyMatch(tool -> "rocketmq_query_message_by_key".equals(tool.name()));
         assertThat(tools).anyMatch(tool -> "rocketmq_query_dlq_messages".equals(tool.name()));
         assertThat(tools).anyMatch(tool -> "rocketmq_query_message_trace".equals(tool.name()));
+        assertThat(tools).anyMatch(tool -> "rocketmq_resend_dlq_message".equals(tool.name()));
         assertThat(tools).anyMatch(tool -> "rocketmq_send_message".equals(tool.name()));
 
         List<McpSchema.Resource> resources = mcpSyncServer.listResources();

@@ -5,6 +5,8 @@ import com.ateng.mcp.rocketmq.rocketmq.admin.dto.DlqMessageListDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.MessageDetailDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.MessageListDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.MessageTraceDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ResendDlqResultDTO;
+import com.ateng.mcp.rocketmq.security.DualLayerGuard;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.mcp.annotation.McpTool;
@@ -12,8 +14,8 @@ import org.springframework.ai.mcp.annotation.McpToolParam;
 import org.springframework.stereotype.Component;
 
 /**
- * RocketMQ 消息检索、死信查验与轨迹追踪 MCP 工具集。
- * 提供按 ID/Key 检索消息、死信队列扫描与消息生命周期轨迹追踪能力。
+ * RocketMQ 消息检索、死信查验、死信重投与轨迹追踪 MCP 工具集。
+ * 提供按 ID/Key 检索消息、死信队列扫描、死信重新投递与消息生命周期轨迹追踪能力。
  *
  * @author Ateng
  * @since 2026-10-04
@@ -24,9 +26,11 @@ public class MessageTools {
     private static final Logger log = LoggerFactory.getLogger(MessageTools.class);
 
     private final AdminClientService adminClientService;
+    private final DualLayerGuard dualLayerGuard;
 
-    public MessageTools(AdminClientService adminClientService) {
+    public MessageTools(AdminClientService adminClientService, DualLayerGuard dualLayerGuard) {
         this.adminClientService = adminClientService;
+        this.dualLayerGuard = dualLayerGuard;
     }
 
     /**
@@ -143,5 +147,41 @@ public class MessageTools {
         String cleanTopic = (topic != null && !topic.isBlank()) ? topic.trim() : null;
         log.info("Executing MCP Tool: rocketmq_query_message_trace with msgId: {}, topic: {}", msgId.trim(), cleanTopic);
         return adminClientService.queryMessageTrace(msgId.trim(), cleanTopic);
+    }
+
+    /**
+     * 将死信队列中的死信消息重新投递回业务目标主题（高危破坏性操作，受双层防呆保护）。
+     *
+     * @param consumerGroup 所属消费组名称（必填）
+     * @param msgId 待重投的死信消息 ID（必填）
+     * @param targetTopic 目标业务主题名称（可选，若为空则自动解析原真实主题）
+     * @param confirm 破坏性操作显式确认参数，必须传 true 方可执行
+     * @return 格式化后的 ResendDlqResultDTO 回执对象
+     * @throws Exception 当底层检索或重新投递失败或防呆拦截时抛出
+     */
+    @McpTool(
+            name = "rocketmq_resend_dlq_message",
+            description = "将死信队列中的死信消息重新投递回业务目标主题（高危破坏性操作，受双层防呆保护）。"
+    )
+    public ResendDlqResultDTO resendDlqMessage(
+            @McpToolParam(description = "所属消费组名称", required = true)
+            String consumerGroup,
+            @McpToolParam(description = "待重投的死信消息 ID", required = true)
+            String msgId,
+            @McpToolParam(description = "目标业务主题名称（可选，若为空则自动解析原真实主题）", required = false)
+            String targetTopic,
+            @McpToolParam(description = "破坏性操作显式确认参数，必须传 true 方可执行", required = true)
+            Boolean confirm) throws Exception {
+        dualLayerGuard.checkDestructiveOperation("rocketmq_resend_dlq_message", confirm);
+        if (consumerGroup == null || consumerGroup.isBlank()) {
+            throw new IllegalArgumentException("Parameter 'consumerGroup' must not be blank");
+        }
+        if (msgId == null || msgId.isBlank()) {
+            throw new IllegalArgumentException("Parameter 'msgId' must not be blank");
+        }
+        String cleanTargetTopic = (targetTopic != null && !targetTopic.isBlank()) ? targetTopic.trim() : null;
+        log.info("Executing MCP Tool: rocketmq_resend_dlq_message for group: {}, msgId: {}, targetTopic: {}",
+                consumerGroup.trim(), msgId.trim(), cleanTargetTopic);
+        return adminClientService.resendDlqMessage(consumerGroup.trim(), msgId.trim(), cleanTargetTopic);
     }
 }

@@ -7,8 +7,11 @@ import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerGroupListDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerLagDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerLagSummaryDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerQueueLagDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ResetOffsetResultDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.SubscriptionDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopConsumerLagDTO;
+import com.ateng.mcp.rocketmq.security.DestructiveOperationBlockedException;
+import com.ateng.mcp.rocketmq.security.DualLayerGuard;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -21,12 +24,16 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
  * 消费组 MCP 工具单元测试。
- * 验证消费组列表、连接状态、队列 Lag 测算与 TopN 积压排行的工具调用与入参校验。
+ * 验证消费组列表、连接状态、队列 Lag 测算、TopN 积压排行与位点重置的工具调用与入参校验。
  *
  * @author Ateng
  * @since 2026-10-04
@@ -37,6 +44,9 @@ class ConsumerToolsTest {
 
     @Mock
     private AdminClientService adminClientService;
+
+    @Mock
+    private DualLayerGuard dualLayerGuard;
 
     @InjectMocks
     private ConsumerTools consumerTools;
@@ -155,5 +165,58 @@ class ConsumerToolsTest {
 
         assertThat(result).isNotNull();
         verify(adminClientService).getTopConsumerLag(3);
+    }
+
+    @Test
+    @DisplayName("验证 rocketmq_reset_consumer_offset 正常执行时间戳与最大位点模式重置")
+    void shouldResetConsumerOffsetSuccessfully() throws Exception {
+        doNothing().when(dualLayerGuard).checkDestructiveOperation("rocketmq_reset_consumer_offset", true);
+        ResetOffsetResultDTO mockResult = new ResetOffsetResultDTO("group-a", "OrderTopic", "TIMESTAMP", 1700000000000L, "SUCCESS", "ok");
+        when(adminClientService.resetOffset("group-a", "OrderTopic", 1700000000000L, false)).thenReturn(mockResult);
+
+        ResetOffsetResultDTO result = consumerTools.resetConsumerOffset("group-a", "OrderTopic", 1700000000000L, false, true);
+
+        assertThat(result).isNotNull();
+        assertThat(result.getConsumerGroup()).isEqualTo("group-a");
+        assertThat(result.getResetMode()).isEqualTo("TIMESTAMP");
+        verify(dualLayerGuard).checkDestructiveOperation("rocketmq_reset_consumer_offset", true);
+        verify(adminClientService).resetOffset("group-a", "OrderTopic", 1700000000000L, false);
+
+        // 最大位点跳过积压模式
+        ResetOffsetResultDTO maxResultMock = new ResetOffsetResultDTO("group-a", "OrderTopic", "MAX_OFFSET", 1790000000000L, "SUCCESS", "ok");
+        when(adminClientService.resetOffset("group-a", "OrderTopic", null, true)).thenReturn(maxResultMock);
+
+        ResetOffsetResultDTO maxResult = consumerTools.resetConsumerOffset("group-a", "OrderTopic", null, true, true);
+        assertThat(maxResult).isNotNull();
+        assertThat(maxResult.getResetMode()).isEqualTo("MAX_OFFSET");
+        verify(adminClientService).resetOffset("group-a", "OrderTopic", null, true);
+    }
+
+    @Test
+    @DisplayName("验证 rocketmq_reset_consumer_offset 在防呆守卫拒绝时短路拦截")
+    void shouldBlockResetConsumerOffsetWhenDualLayerGuardRejects() throws Exception {
+        doThrow(new DestructiveOperationBlockedException("rocketmq_reset_consumer_offset", "blocked"))
+                .when(dualLayerGuard).checkDestructiveOperation("rocketmq_reset_consumer_offset", false);
+
+        assertThatThrownBy(() -> consumerTools.resetConsumerOffset("group-a", "OrderTopic", null, true, false))
+                .isInstanceOf(DestructiveOperationBlockedException.class);
+
+        verify(adminClientService, never()).resetOffset(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("验证 rocketmq_reset_consumer_offset 入参非法时前置抛出 IllegalArgumentException")
+    void shouldThrowExceptionWhenResetOffsetParamsAreInvalid() {
+        doNothing().when(dualLayerGuard).checkDestructiveOperation("rocketmq_reset_consumer_offset", true);
+
+        assertThatThrownBy(() -> consumerTools.resetConsumerOffset("   ", "OrderTopic", 1000L, false, true))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        assertThatThrownBy(() -> consumerTools.resetConsumerOffset("group-a", "   ", 1000L, false, true))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        assertThatThrownBy(() -> consumerTools.resetConsumerOffset("group-a", "OrderTopic", null, false, true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Parameter 'timestamp' must be greater than 0");
     }
 }

@@ -4,6 +4,9 @@ import com.ateng.mcp.rocketmq.rocketmq.admin.AdminClientService;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicListDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicRouteDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicStatusDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicOperationResultDTO;
+import com.ateng.mcp.rocketmq.security.DualLayerGuard;
+import com.ateng.mcp.rocketmq.security.ReadOnlyGuard;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.mcp.annotation.McpTool;
@@ -11,8 +14,8 @@ import org.springframework.ai.mcp.annotation.McpToolParam;
 import org.springframework.stereotype.Component;
 
 /**
- * RocketMQ 主题元数据、队列路由与位点状态 MCP 工具集。
- * 提供主题发现、读写队列分布拓扑、以及各队列最小/最大位点与容量感知的标准化查询能力。
+ * RocketMQ 主题元数据、队列路由、位点状态与主题管控 MCP 工具集。
+ * 提供主题发现、读写队列分布拓扑、以及声明式主题创建与破坏性主题删除控制能力。
  *
  * @author Ateng
  * @since 2026-10-04
@@ -23,9 +26,13 @@ public class TopicTools {
     private static final Logger log = LoggerFactory.getLogger(TopicTools.class);
 
     private final AdminClientService adminClientService;
+    private final ReadOnlyGuard readOnlyGuard;
+    private final DualLayerGuard dualLayerGuard;
 
-    public TopicTools(AdminClientService adminClientService) {
+    public TopicTools(AdminClientService adminClientService, ReadOnlyGuard readOnlyGuard, DualLayerGuard dualLayerGuard) {
         this.adminClientService = adminClientService;
+        this.readOnlyGuard = readOnlyGuard;
+        this.dualLayerGuard = dualLayerGuard;
     }
 
     /**
@@ -87,5 +94,62 @@ public class TopicTools {
         }
         log.info("Executing MCP Tool: rocketmq_topic_status with topic: {}", topic);
         return adminClientService.getTopicStatus(topic.trim());
+    }
+
+    /**
+     * 声明式创建或修改 RocketMQ 业务主题，支持指定读写队列数与读写权限。
+     * 受全局只读守卫保护。
+     *
+     * @param topic 目标主题名称（必填）
+     * @param readQueueNums 读队列数量（可选，默认为 8）
+     * @param writeQueueNums 写队列数量（可选，默认为 8）
+     * @param perm 权限模式（可选，默认 6 即读写）
+     * @return 格式化后的 TopicOperationResultDTO 操作回执对象
+     * @throws Exception 当底层创建失败时抛出
+     */
+    @McpTool(
+            name = "rocketmq_create_topic",
+            description = "声明式创建或修改 RocketMQ 业务主题，支持指定读写队列数与读写权限。"
+    )
+    public TopicOperationResultDTO createTopic(
+            @McpToolParam(description = "目标主题名称", required = true)
+            String topic,
+            @McpToolParam(description = "读队列数量（可选，默认为 8）", required = false)
+            Integer readQueueNums,
+            @McpToolParam(description = "写队列数量（可选，默认为 8）", required = false)
+            Integer writeQueueNums,
+            @McpToolParam(description = "权限模式（可选，默认 6 即读写）", required = false)
+            Integer perm) throws Exception {
+        readOnlyGuard.checkWritable("rocketmq_create_topic");
+        if (topic == null || topic.isBlank()) {
+            throw new IllegalArgumentException("Parameter 'topic' must not be blank");
+        }
+        log.info("Executing MCP Tool: rocketmq_create_topic for topic: {}", topic.trim());
+        return adminClientService.createTopic(topic.trim(), readQueueNums, writeQueueNums, perm);
+    }
+
+    /**
+     * 删除指定的 RocketMQ 业务主题（高危破坏性操作，受双层防呆保护）。
+     *
+     * @param topic 待删除的目标主题名称（必填）
+     * @param confirm 破坏性操作显式确认参数，必须显式传入 true 方可执行
+     * @return 格式化后的 TopicOperationResultDTO 操作回执对象
+     * @throws Exception 当底层删除失败或防呆拦截时抛出
+     */
+    @McpTool(
+            name = "rocketmq_delete_topic",
+            description = "删除指定的 RocketMQ 业务主题（高危破坏性操作，受双层防呆保护）。"
+    )
+    public TopicOperationResultDTO deleteTopic(
+            @McpToolParam(description = "待删除的目标主题名称", required = true)
+            String topic,
+            @McpToolParam(description = "破坏性操作显式确认参数，必须传 true 方可执行", required = true)
+            Boolean confirm) throws Exception {
+        dualLayerGuard.checkDestructiveOperation("rocketmq_delete_topic", confirm);
+        if (topic == null || topic.isBlank()) {
+            throw new IllegalArgumentException("Parameter 'topic' must not be blank");
+        }
+        log.info("Executing MCP Tool: rocketmq_delete_topic for topic: {}", topic.trim());
+        return adminClientService.deleteTopic(topic.trim());
     }
 }

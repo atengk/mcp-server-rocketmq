@@ -10,12 +10,20 @@ import com.ateng.mcp.rocketmq.rocketmq.admin.dto.DlqMessageListDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.MessageDetailDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.MessageListDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.MessageTraceDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ResendDlqResultDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ResetOffsetResultDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopConsumerLagDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicListDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicOperationResultDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicOverviewDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicRouteDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicStatusDTO;
+import com.ateng.mcp.rocketmq.rocketmq.messaging.MessagingClientService;
+import com.ateng.mcp.rocketmq.rocketmq.messaging.dto.SendMessageResultDTO;
 import org.apache.rocketmq.client.QueryResult;
+import org.apache.rocketmq.common.TopicConfig;
+import org.apache.rocketmq.common.message.MessageAccessor;
+import org.apache.rocketmq.common.message.MessageConst;
 import org.apache.rocketmq.common.message.MessageExt;
 import org.apache.rocketmq.remoting.protocol.admin.ConsumeStats;
 import org.apache.rocketmq.remoting.protocol.admin.OffsetWrapper;
@@ -48,6 +56,7 @@ import java.util.HashMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -722,11 +731,163 @@ class DefaultAdminClientServiceTest {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    @DisplayName("验证声明式创建主题向 Master Broker 发送 TopicConfig 并返回结果")
+    void shouldCreateTopicSuccessfully() throws Exception {
+        RocketmqProperties properties = new RocketmqProperties();
+        DefaultMQAdminExt mockClient = mock(DefaultMQAdminExt.class);
+        TestableAdminClientService service = new TestableAdminClientService(properties, mockClient);
+
+        ClusterInfo clusterInfo = new ClusterInfo();
+        HashMap<String, BrokerData> brokerAddrTable = new HashMap<>();
+        BrokerData brokerData = new BrokerData();
+        brokerData.setBrokerName("broker-a");
+        brokerData.setBrokerAddrs(new HashMap<>(Map.of(0L, "192.168.1.10:10911")));
+        brokerAddrTable.put("broker-a", brokerData);
+        clusterInfo.setBrokerAddrTable(brokerAddrTable);
+
+        when(mockClient.examineBrokerClusterInfo()).thenReturn(clusterInfo);
+
+        TopicOperationResultDTO result = service.createTopic("NewOrderTopic", 16, 16, 6);
+
+        assertThat(result).isNotNull();
+        assertThat(result.getOperation()).isEqualTo("CREATE_TOPIC");
+        assertThat(result.getTopic()).isEqualTo("NewOrderTopic");
+        assertThat(result.getStatus()).isEqualTo("SUCCESS");
+        verify(mockClient).createAndUpdateTopicConfig(anyString(), any(TopicConfig.class));
+    }
+
+    @Test
+    @DisplayName("验证删除主题时向 Broker 与 NameServer 发出指令并返回结果")
+    void shouldDeleteTopicSuccessfully() throws Exception {
+        RocketmqProperties properties = new RocketmqProperties();
+        properties.setNamesrvAddr("127.0.0.1:9876;127.0.0.2:9876");
+        DefaultMQAdminExt mockClient = mock(DefaultMQAdminExt.class);
+        TestableAdminClientService service = new TestableAdminClientService(properties, mockClient);
+
+        ClusterInfo clusterInfo = new ClusterInfo();
+        HashMap<String, BrokerData> brokerAddrTable = new HashMap<>();
+        BrokerData brokerData = new BrokerData();
+        brokerData.setBrokerName("broker-a");
+        brokerData.setBrokerAddrs(new HashMap<>(Map.of(0L, "192.168.1.10:10911")));
+        brokerAddrTable.put("broker-a", brokerData);
+        clusterInfo.setBrokerAddrTable(brokerAddrTable);
+
+        when(mockClient.examineBrokerClusterInfo()).thenReturn(clusterInfo);
+
+        TopicOperationResultDTO result = service.deleteTopic("OldTopic");
+
+        assertThat(result).isNotNull();
+        assertThat(result.getOperation()).isEqualTo("DELETE_TOPIC");
+        assertThat(result.getTopic()).isEqualTo("OldTopic");
+        assertThat(result.getStatus()).isEqualTo("SUCCESS");
+        verify(mockClient).deleteTopicInBroker(any(), anyString());
+        verify(mockClient).deleteTopicInNameServer(any(), anyString());
+    }
+
+    @Test
+    @DisplayName("验证按时间戳重置位点与跳过积压至最大位点模式成功调用底层 API")
+    void shouldResetOffsetSuccessfully() throws Exception {
+        RocketmqProperties properties = new RocketmqProperties();
+        DefaultMQAdminExt mockClient = mock(DefaultMQAdminExt.class);
+        TestableAdminClientService service = new TestableAdminClientService(properties, mockClient);
+
+        // 1. 时间戳模式
+        ResetOffsetResultDTO tsResult = service.resetOffset("order_group", "OrderTopic", 1700000000000L, false);
+        assertThat(tsResult).isNotNull();
+        assertThat(tsResult.getResetMode()).isEqualTo("TIMESTAMP");
+        assertThat(tsResult.getTargetTimestamp()).isEqualTo(1700000000000L);
+        verify(mockClient).resetOffsetByTimestamp("OrderTopic", "order_group", 1700000000000L, true);
+
+        // 2. 最大位点跳过积压模式
+        ResetOffsetResultDTO maxResult = service.resetOffset("order_group", "OrderTopic", null, true);
+        assertThat(maxResult).isNotNull();
+        assertThat(maxResult.getResetMode()).isEqualTo("MAX_OFFSET");
+        assertThat(maxResult.getTargetTimestamp()).isNotNull();
+        verify(mockClient, times(2)).resetOffsetByTimestamp(anyString(), anyString(), anyLong(), any(Boolean.class));
+    }
+
+    @Test
+    @DisplayName("验证重新投递死信队列消息成功解析并调用 MessagingClientService 发送回原主题")
+    void shouldResendDlqMessageSuccessfully() throws Exception {
+        RocketmqProperties properties = new RocketmqProperties();
+        DefaultMQAdminExt mockClient = mock(DefaultMQAdminExt.class);
+        MessagingClientService mockMessaging = mock(MessagingClientService.class);
+        TestableAdminClientService service = new TestableAdminClientService(properties, mockClient, mockMessaging);
+
+        MessageExt dlqMsg = new MessageExt();
+        dlqMsg.setMsgId("DLQ_MSG_01");
+        dlqMsg.setBody("retry payload".getBytes(StandardCharsets.UTF_8));
+        dlqMsg.setTags("TagA");
+        dlqMsg.setKeys("KEY123");
+        MessageAccessor.putProperty(dlqMsg, MessageConst.PROPERTY_REAL_TOPIC, "OriginalOrderTopic");
+
+        when(mockClient.viewMessage("%DLQ%order_group", "DLQ_MSG_01")).thenReturn(dlqMsg);
+        SendMessageResultDTO sendResult = new SendMessageResultDTO("NEW_MSG_02", "OriginalOrderTopic", "SUCCESS");
+        when(mockMessaging.sendMessage("OriginalOrderTopic", "retry payload", "TagA", "KEY123", null, null))
+                .thenReturn(sendResult);
+
+        ResendDlqResultDTO result = service.resendDlqMessage("order_group", "DLQ_MSG_01", null);
+
+        assertThat(result).isNotNull();
+        assertThat(result.getStatus()).isEqualTo("SUCCESS");
+        assertThat(result.getConsumerGroup()).isEqualTo("order_group");
+        assertThat(result.getMsgId()).isEqualTo("DLQ_MSG_01");
+        assertThat(result.getTargetTopic()).isEqualTo("OriginalOrderTopic");
+        assertThat(result.getResendMessageId()).isEqualTo("NEW_MSG_02");
+    }
+
+    @Test
+    @DisplayName("验证控制面破坏性参数为空或试图删除系统主题时抛出 IllegalArgumentException")
+    void shouldThrowExceptionWhenDestructiveAdminParamsAreInvalid() {
+        RocketmqProperties properties = new RocketmqProperties();
+        DefaultMQAdminExt mockClient = mock(DefaultMQAdminExt.class);
+        TestableAdminClientService service = new TestableAdminClientService(properties, mockClient);
+
+        // 创建主题参数为空
+        assertThatThrownBy(() -> service.createTopic("   ", null, null, null))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        // 删除主题参数为空或删除系统主题
+        assertThatThrownBy(() -> service.deleteTopic(null))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.deleteTopic("TBW102"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Cannot delete internal system topic");
+        assertThatThrownBy(() -> service.deleteTopic("%SYS%BENCHMARK"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Cannot delete internal system topic");
+
+        // 重置位点参数防御
+        assertThatThrownBy(() -> service.resetOffset("  ", "Topic", 1000L, false))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.resetOffset("group", "  ", 1000L, false))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.resetOffset("group", "Topic", null, false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Parameter 'timestamp' must be greater than 0");
+
+        // 死信重投参数防御
+        assertThatThrownBy(() -> service.resendDlqMessage(" ", "MSG_01", null))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.resendDlqMessage("group", " ", null))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        // 死信重投组件缺失防御
+        assertThatThrownBy(() -> service.resendDlqMessage("group", "MSG_01", null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("MessagingClientService is unavailable");
+    }
+
     private static class TestableAdminClientService extends DefaultAdminClientService {
         private final DefaultMQAdminExt mockClient;
 
         public TestableAdminClientService(RocketmqProperties properties, DefaultMQAdminExt mockClient) {
-            super(properties);
+            this(properties, mockClient, null);
+        }
+
+        public TestableAdminClientService(RocketmqProperties properties, DefaultMQAdminExt mockClient, MessagingClientService messagingClientService) {
+            super(properties, messagingClientService);
             this.mockClient = mockClient;
         }
 

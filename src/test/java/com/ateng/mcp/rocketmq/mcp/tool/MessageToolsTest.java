@@ -6,6 +6,9 @@ import com.ateng.mcp.rocketmq.rocketmq.admin.dto.MessageDetailDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.MessageListDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.MessageTraceDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.MessageTraceNodeDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ResendDlqResultDTO;
+import com.ateng.mcp.rocketmq.security.DestructiveOperationBlockedException;
+import com.ateng.mcp.rocketmq.security.DualLayerGuard;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -19,12 +22,16 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * 消息检索、死信查验与轨迹追踪 MCP 工具单元测试。
- * 验证 rocketmq_query_message_by_id、rocketmq_query_message_by_key、rocketmq_query_dlq_messages 与 rocketmq_query_message_trace 工具调用逻辑与参数校验。
+ * 消息检索、死信查验、死信重投与轨迹追踪 MCP 工具单元测试。
+ * 验证 rocketmq_query_message_by_id、rocketmq_query_message_by_key、rocketmq_query_dlq_messages、rocketmq_query_message_trace 与 rocketmq_resend_dlq_message 工具调用逻辑与参数校验。
  *
  * @author Ateng
  * @since 2026-10-04
@@ -35,6 +42,9 @@ class MessageToolsTest {
 
     @Mock
     private AdminClientService adminClientService;
+
+    @Mock
+    private DualLayerGuard dualLayerGuard;
 
     @InjectMocks
     private MessageTools messageTools;
@@ -198,5 +208,47 @@ class MessageToolsTest {
         assertThatThrownBy(() -> messageTools.queryMessageTrace(null, null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Parameter 'msgId' must not be blank");
+    }
+
+    @Test
+    @DisplayName("验证 rocketmq_resend_dlq_message 全授权并确认时正常重投死信消息")
+    void shouldResendDlqMessageSuccessfully() throws Exception {
+        doNothing().when(dualLayerGuard).checkDestructiveOperation("rocketmq_resend_dlq_message", true);
+        ResendDlqResultDTO mockResult = new ResendDlqResultDTO("order_group", "MSG_DLQ_01", "OrderTopic", "MSG_NEW_02", "SUCCESS", "ok");
+        when(adminClientService.resendDlqMessage("order_group", "MSG_DLQ_01", "OrderTopic")).thenReturn(mockResult);
+
+        ResendDlqResultDTO result = messageTools.resendDlqMessage("order_group", "MSG_DLQ_01", "OrderTopic", true);
+
+        assertThat(result).isNotNull();
+        assertThat(result.getConsumerGroup()).isEqualTo("order_group");
+        assertThat(result.getMsgId()).isEqualTo("MSG_DLQ_01");
+        assertThat(result.getTargetTopic()).isEqualTo("OrderTopic");
+        assertThat(result.getResendMessageId()).isEqualTo("MSG_NEW_02");
+        verify(dualLayerGuard).checkDestructiveOperation("rocketmq_resend_dlq_message", true);
+        verify(adminClientService).resendDlqMessage("order_group", "MSG_DLQ_01", "OrderTopic");
+    }
+
+    @Test
+    @DisplayName("验证 rocketmq_resend_dlq_message 在防呆守卫拒绝时短路拦截")
+    void shouldBlockResendDlqMessageWhenDualLayerGuardRejects() throws Exception {
+        doThrow(new DestructiveOperationBlockedException("rocketmq_resend_dlq_message", "blocked"))
+                .when(dualLayerGuard).checkDestructiveOperation("rocketmq_resend_dlq_message", false);
+
+        assertThatThrownBy(() -> messageTools.resendDlqMessage("order_group", "MSG_DLQ_01", "OrderTopic", false))
+                .isInstanceOf(DestructiveOperationBlockedException.class);
+
+        verify(adminClientService, never()).resendDlqMessage(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("验证 rocketmq_resend_dlq_message 入参空白时前置抛出 IllegalArgumentException")
+    void shouldThrowExceptionWhenResendDlqParamsAreBlank() {
+        doNothing().when(dualLayerGuard).checkDestructiveOperation("rocketmq_resend_dlq_message", true);
+
+        assertThatThrownBy(() -> messageTools.resendDlqMessage("   ", "MSG_01", null, true))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        assertThatThrownBy(() -> messageTools.resendDlqMessage("order_group", "   ", null, true))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 }

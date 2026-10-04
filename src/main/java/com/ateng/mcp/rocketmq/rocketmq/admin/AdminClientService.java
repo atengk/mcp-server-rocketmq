@@ -9,8 +9,11 @@ import com.ateng.mcp.rocketmq.rocketmq.admin.dto.DlqMessageListDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.MessageDetailDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.MessageListDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.MessageTraceDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ResendDlqResultDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ResetOffsetResultDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopConsumerLagDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicListDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicOperationResultDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicOverviewDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicRouteDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicStatusDTO;
@@ -174,4 +177,48 @@ public interface AdminClientService {
      * @return DefaultMQAdminExt 底层管理客户端
      */
     DefaultMQAdminExt getMQAdminExt();
+
+    /**
+     * 声明式创建或更新业务主题配置（包含读写队列数与权限模式）。
+     *
+     * @param topic 主题名称（必填）
+     * @param readQueueNums 读队列数量（可选，默认 8）
+     * @param writeQueueNums 写队列数量（可选，默认 8）
+     * @param perm 权限模式（可选，默认 6 即读写）
+     * @return 格式化后的 TopicOperationResultDTO 实例
+     * @throws Exception 当底层创建失败时抛出
+     */
+    TopicOperationResultDTO createTopic(String topic, Integer readQueueNums, Integer writeQueueNums, Integer perm) throws Exception;
+
+    /**
+     * 删除指定的业务主题（禁止删除系统保留主题）。
+     *
+     * @param topic 待删除的主题名称（必填）
+     * @return 格式化后的 TopicOperationResultDTO 实例
+     * @throws Exception 当底层删除失败时抛出
+     */
+    TopicOperationResultDTO deleteTopic(String topic) throws Exception;
+
+    /**
+     * 重置指定消费组在目标主题上的消费位点（支持按时间戳或跳过积压至最大位点）。
+     *
+     * @param consumerGroup 消费组名称（必填）
+     * @param topic 目标主题名称（必填）
+     * @param timestamp 目标时间戳（毫秒，按时间戳重置模式必填）
+     * @param resetToMax 是否直接重置到最新最大位点以跳过积压（默认 false）
+     * @return 格式化后的 ResetOffsetResultDTO 实例
+     * @throws Exception 当底层重置位点失败时抛出
+     */
+    ResetOffsetResultDTO resetOffset(String consumerGroup, String topic, Long timestamp, Boolean resetToMax) throws Exception;
+
+    /**
+     * 将指定死信队列中的单条死信消息重新投递回业务目标主题。
+     *
+     * @param consumerGroup 消费组名称（必填）
+     * @param msgId 死信消息 ID（必填）
+     * @param targetTopic 目标业务主题名称（可选，若为空则自动解析原真实主题）
+     * @return 格式化后的 ResendDlqResultDTO 实例
+     * @throws Exception 当底层消息检索或重投失败时抛出
+     */
+    ResendDlqResultDTO resendDlqMessage(String consumerGroup, String msgId, String targetTopic) throws Exception;
 }

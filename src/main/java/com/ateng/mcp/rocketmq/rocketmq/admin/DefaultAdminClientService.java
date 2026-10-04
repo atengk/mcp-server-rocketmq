@@ -16,20 +16,29 @@ import com.ateng.mcp.rocketmq.rocketmq.admin.dto.MessageListDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.MessageTraceDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.MessageTraceNodeDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.QueueDataDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ResendDlqResultDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ResetOffsetResultDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.SubscriptionDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopConsumerLagDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicListDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicOperationResultDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicOverviewDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicQueueOffsetDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicRouteDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicStatusDTO;
+import com.ateng.mcp.rocketmq.rocketmq.messaging.MessagingClientService;
+import com.ateng.mcp.rocketmq.rocketmq.messaging.dto.SendMessageResultDTO;
 import com.ateng.mcp.rocketmq.rocketmq.util.ConsumerGroupFilterUtils;
 import com.ateng.mcp.rocketmq.rocketmq.util.MessageBodyGuard;
 import com.ateng.mcp.rocketmq.rocketmq.util.TopicFilterUtils;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import org.apache.rocketmq.client.QueryResult;
 import org.apache.rocketmq.client.trace.TraceView;
+import org.apache.rocketmq.common.TopicConfig;
+import org.apache.rocketmq.common.message.MessageConst;
 import org.apache.rocketmq.common.message.MessageExt;
 import org.apache.rocketmq.common.message.MessageQueue;
 import org.apache.rocketmq.remoting.exception.RemotingConnectException;
@@ -54,6 +63,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.beans.factory.InitializingBean;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -76,12 +86,22 @@ public class DefaultAdminClientService implements AdminClientService, Initializi
 
     private static final Logger log = LoggerFactory.getLogger(DefaultAdminClientService.class);
 
+    private static final long MASTER_BROKER_ID = 0L;
+    private static final int DEFAULT_QUEUE_NUMS = 8;
+    private static final int DEFAULT_TOPIC_PERM = 6;
+
     private final RocketmqProperties properties;
+    private final MessagingClientService messagingClientService;
     private DefaultMQAdminExt mqAdminExt;
     private volatile boolean started = false;
 
     public DefaultAdminClientService(RocketmqProperties properties) {
+        this(properties, null);
+    }
+
+    public DefaultAdminClientService(RocketmqProperties properties, @Lazy MessagingClientService messagingClientService) {
         this.properties = properties;
+        this.messagingClientService = messagingClientService;
     }
 
     @Override
@@ -906,6 +926,168 @@ public class DefaultAdminClientService implements AdminClientService, Initializi
     @Override
     public DefaultMQAdminExt getMQAdminExt() {
         return mqAdminExt;
+    }
+
+    @Override
+    public TopicOperationResultDTO createTopic(String topic, Integer readQueueNums, Integer writeQueueNums, Integer perm) throws Exception {
+        // 1. 前置卫语句判空与参数清洗
+        if (topic == null || topic.isBlank()) {
+            throw new IllegalArgumentException("Parameter 'topic' must not be blank");
+        }
+        int readQueues = (readQueueNums != null && readQueueNums > 0) ? readQueueNums : DEFAULT_QUEUE_NUMS;
+        int writeQueues = (writeQueueNums != null && writeQueueNums > 0) ? writeQueueNums : DEFAULT_QUEUE_NUMS;
+        int permission = (perm != null && perm >= 0) ? perm : DEFAULT_TOPIC_PERM;
+
+        // 2. 装配 Topic 配置并同步下发至各 Master Broker
+        DefaultMQAdminExt client = ensureStarted();
+        ClusterInfo clusterInfo = examineBrokerClusterInfo();
+        TopicConfig topicConfig = new TopicConfig(topic.trim());
+        topicConfig.setReadQueueNums(readQueues);
+        topicConfig.setWriteQueueNums(writeQueues);
+        topicConfig.setPerm(permission);
+
+        Set<String> masterBrokers = getMasterBrokerAddresses(clusterInfo);
+        int updatedBrokers = 0;
+        for (String masterAddr : masterBrokers) {
+            client.createAndUpdateTopicConfig(masterAddr, topicConfig);
+            updatedBrokers++;
+        }
+        log.info("Successfully created or updated topic '{}' (readQueues={}, writeQueues={}, perm={}) across {} broker(s)",
+                topic.trim(), readQueues, writeQueues, permission, updatedBrokers);
+        return new TopicOperationResultDTO("CREATE_TOPIC", topic.trim(), "SUCCESS",
+                "Successfully created or updated topic on " + updatedBrokers + " broker(s)");
+    }
+
+    @Override
+    public TopicOperationResultDTO deleteTopic(String topic) throws Exception {
+        // 1. 前置卫语句防御与系统主题拦截
+        if (topic == null || topic.isBlank()) {
+            throw new IllegalArgumentException("Parameter 'topic' must not be blank");
+        }
+        if (TopicFilterUtils.isSystemTopic(topic.trim())) {
+            throw new IllegalArgumentException("Cannot delete internal system topic: " + topic);
+        }
+
+        // 2. 依次向 Broker 与 NameServer 双端发起主题元数据物理清理
+        DefaultMQAdminExt client = ensureStarted();
+        ClusterInfo clusterInfo = examineBrokerClusterInfo();
+        Set<String> masterBrokers = getMasterBrokerAddresses(clusterInfo);
+        if (!masterBrokers.isEmpty()) {
+            client.deleteTopicInBroker(masterBrokers, topic.trim());
+        }
+
+        Set<String> namesrvSet = Collections.emptySet();
+        if (properties.getNamesrvAddr() != null && !properties.getNamesrvAddr().isBlank()) {
+            namesrvSet = Arrays.stream(properties.getNamesrvAddr().split(";"))
+                    .map(String::trim)
+                    .filter(s -> !s.isEmpty())
+                    .collect(Collectors.toSet());
+        }
+        if (!namesrvSet.isEmpty()) {
+            client.deleteTopicInNameServer(namesrvSet, topic.trim());
+        }
+
+        log.info("Successfully deleted topic '{}' from {} brokers and {} nameservers",
+                topic.trim(), masterBrokers.size(), namesrvSet.size());
+        return new TopicOperationResultDTO("DELETE_TOPIC", topic.trim(), "SUCCESS",
+                "Successfully deleted topic from brokers and nameservers");
+    }
+
+    @Override
+    public ResetOffsetResultDTO resetOffset(String consumerGroup, String topic, Long timestamp, Boolean resetToMax) throws Exception {
+        // 1. 前置卫语句判空防御与时间模式决策
+        if (consumerGroup == null || consumerGroup.isBlank()) {
+            throw new IllegalArgumentException("Parameter 'consumerGroup' must not be blank");
+        }
+        if (topic == null || topic.isBlank()) {
+            throw new IllegalArgumentException("Parameter 'topic' must not be blank");
+        }
+
+        boolean toMax = Boolean.TRUE.equals(resetToMax);
+        long targetTime;
+        String mode;
+        if (toMax) {
+            mode = "MAX_OFFSET";
+            targetTime = System.currentTimeMillis();
+        } else {
+            mode = "TIMESTAMP";
+            if (timestamp == null || timestamp <= 0) {
+                throw new IllegalArgumentException("Parameter 'timestamp' must be greater than 0 when resetToMax is false");
+            }
+            targetTime = timestamp;
+        }
+
+        // 2. 调度 AdminRemoting 客户端执行消费位点回拨
+        DefaultMQAdminExt client = ensureStarted();
+        client.resetOffsetByTimestamp(topic.trim(), consumerGroup.trim(), targetTime, true);
+        log.info("Successfully reset offset for group '{}' on topic '{}' to mode '{}' (targetTime={})",
+                consumerGroup.trim(), topic.trim(), mode, targetTime);
+        return new ResetOffsetResultDTO(consumerGroup.trim(), topic.trim(), mode, targetTime, "SUCCESS",
+                "Consumer offset reset successfully");
+    }
+
+    @Override
+    public ResendDlqResultDTO resendDlqMessage(String consumerGroup, String msgId, String targetTopic) throws Exception {
+        // 1. 前置卫语句防御与服务可用性校验
+        if (consumerGroup == null || consumerGroup.isBlank()) {
+            throw new IllegalArgumentException("Parameter 'consumerGroup' must not be blank");
+        }
+        if (msgId == null || msgId.isBlank()) {
+            throw new IllegalArgumentException("Parameter 'msgId' must not be blank");
+        }
+        if (messagingClientService == null) {
+            throw new IllegalStateException("MessagingClientService is unavailable for resending DLQ message");
+        }
+
+        // 2. 检索死信队列报文并解析目标投递主题
+        DefaultMQAdminExt client = ensureStarted();
+        String dlqTopic = "%DLQ%" + consumerGroup.trim();
+        MessageExt msg = client.viewMessage(dlqTopic, msgId.trim());
+        if (msg == null) {
+            throw new IllegalArgumentException("Message not found with id: " + msgId);
+        }
+
+        String resolvedTopic = targetTopic;
+        if (resolvedTopic == null || resolvedTopic.isBlank()) {
+            resolvedTopic = msg.getProperty(MessageConst.PROPERTY_REAL_TOPIC);
+        }
+        if (resolvedTopic == null || resolvedTopic.isBlank()) {
+            throw new IllegalArgumentException("Cannot determine target topic for message " + msgId + ", please specify 'targetTopic' explicitly");
+        }
+
+        // 3. 执行消息重投投递并装配结果
+        String body = (msg.getBody() != null) ? new String(msg.getBody(), StandardCharsets.UTF_8) : "";
+        String tag = msg.getTags();
+        String keys = msg.getKeys();
+
+        SendMessageResultDTO sendResult = messagingClientService.sendMessage(resolvedTopic.trim(), body, tag, keys, null, null);
+        String newMsgId = (sendResult != null) ? sendResult.getMessageId() : null;
+        log.info("Successfully resent DLQ message '{}' (group: {}) to topic '{}', new messageId: {}",
+                msgId.trim(), consumerGroup.trim(), resolvedTopic.trim(), newMsgId);
+        return new ResendDlqResultDTO(consumerGroup.trim(), msgId.trim(), resolvedTopic.trim(), newMsgId, "SUCCESS",
+                "Dead letter message successfully resent to topic " + resolvedTopic.trim());
+    }
+
+    /**
+     * 从集群拓扑中提取所有 Master Broker 的通信地址集合。
+     *
+     * @param clusterInfo 集群元数据信息
+     * @return Master Broker 地址集合，不为 null
+     */
+    private Set<String> getMasterBrokerAddresses(ClusterInfo clusterInfo) {
+        if (clusterInfo == null || clusterInfo.getBrokerAddrTable() == null) {
+            return Collections.emptySet();
+        }
+        Set<String> masterBrokers = new HashSet<>();
+        for (BrokerData brokerData : clusterInfo.getBrokerAddrTable().values()) {
+            if (brokerData != null && brokerData.getBrokerAddrs() != null) {
+                String masterAddr = brokerData.getBrokerAddrs().get(MASTER_BROKER_ID);
+                if (masterAddr != null && !masterAddr.isBlank()) {
+                    masterBrokers.add(masterAddr);
+                }
+            }
+        }
+        return masterBrokers;
     }
 
     @Override

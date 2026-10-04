@@ -4,7 +4,9 @@ import com.ateng.mcp.rocketmq.rocketmq.admin.AdminClientService;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerConnectionDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerGroupListDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerLagDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ResetOffsetResultDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopConsumerLagDTO;
+import com.ateng.mcp.rocketmq.security.DualLayerGuard;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.mcp.annotation.McpTool;
@@ -12,8 +14,8 @@ import org.springframework.ai.mcp.annotation.McpToolParam;
 import org.springframework.stereotype.Component;
 
 /**
- * RocketMQ 消费组全景审计、连接状态与实时积压排行 MCP 工具集。
- * 提供活跃消费组发现、在线实例连接查验、分片队列精准 Lag 测算与集群 TopN 积压排行榜能力。
+ * RocketMQ 消费组全景审计、连接状态、实时积压排行与消费位点重置 MCP 工具集。
+ * 提供活跃消费组发现、在线实例连接查验、分片队列精准 Lag 测算、集群 TopN 积压排行榜与位点回溯重置能力。
  *
  * @author Ateng
  * @since 2026-10-04
@@ -24,9 +26,11 @@ public class ConsumerTools {
     private static final Logger log = LoggerFactory.getLogger(ConsumerTools.class);
 
     private final AdminClientService adminClientService;
+    private final DualLayerGuard dualLayerGuard;
 
-    public ConsumerTools(AdminClientService adminClientService) {
+    public ConsumerTools(AdminClientService adminClientService, DualLayerGuard dualLayerGuard) {
         this.adminClientService = adminClientService;
+        this.dualLayerGuard = dualLayerGuard;
     }
 
     /**
@@ -111,5 +115,47 @@ public class ConsumerTools {
         int limit = (topN != null && topN > 0) ? topN : 10;
         log.info("Executing MCP Tool: rocketmq_top_consumer_lag with topN: {}", limit);
         return adminClientService.getTopConsumerLag(limit);
+    }
+
+    /**
+     * 重置指定消费组在目标主题上的消费位点（支持按时间戳回溯或跳过积压至最大位点，高危破坏性操作，受双层防呆保护）。
+     *
+     * @param consumerGroup 目标消费组名称（必填）
+     * @param topic 目标主题名称（必填）
+     * @param timestamp 目标回溯时间戳（毫秒，按时间戳模式必填）
+     * @param resetToMax 是否跳过积压直接重置到最大位点（默认 false）
+     * @param confirm 破坏性操作显式确认参数，必须传 true 方可执行
+     * @return 格式化后的 ResetOffsetResultDTO 回执对象
+     * @throws Exception 当底层重置位点失败或防呆拦截时抛出
+     */
+    @McpTool(
+            name = "rocketmq_reset_consumer_offset",
+            description = "重置指定消费组的消费位点（支持按时间戳回溯或跳过积压至最大位点，高危破坏性操作，受双层防呆保护）。"
+    )
+    public ResetOffsetResultDTO resetConsumerOffset(
+            @McpToolParam(description = "目标消费组名称", required = true)
+            String consumerGroup,
+            @McpToolParam(description = "目标主题名称", required = true)
+            String topic,
+            @McpToolParam(description = "目标回溯时间戳（毫秒，按时间戳模式必填）", required = false)
+            Long timestamp,
+            @McpToolParam(description = "是否跳过积压直接重置到最大位点（默认 false）", required = false)
+            Boolean resetToMax,
+            @McpToolParam(description = "破坏性操作显式确认参数，必须传 true 方可执行", required = true)
+            Boolean confirm) throws Exception {
+        dualLayerGuard.checkDestructiveOperation("rocketmq_reset_consumer_offset", confirm);
+        if (consumerGroup == null || consumerGroup.isBlank()) {
+            throw new IllegalArgumentException("Parameter 'consumerGroup' must not be blank");
+        }
+        if (topic == null || topic.isBlank()) {
+            throw new IllegalArgumentException("Parameter 'topic' must not be blank");
+        }
+        boolean toMax = Boolean.TRUE.equals(resetToMax);
+        if (!toMax && (timestamp == null || timestamp <= 0)) {
+            throw new IllegalArgumentException("Parameter 'timestamp' must be greater than 0 when 'resetToMax' is false");
+        }
+        log.info("Executing MCP Tool: rocketmq_reset_consumer_offset for group: {}, topic: {}, timestamp: {}, resetToMax: {}",
+                consumerGroup.trim(), topic.trim(), timestamp, toMax);
+        return adminClientService.resetOffset(consumerGroup.trim(), topic.trim(), timestamp, toMax);
     }
 }
