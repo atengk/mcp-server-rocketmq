@@ -1,6 +1,7 @@
 package com.ateng.mcp.rocketmq.mcp.tool;
 
 import com.ateng.mcp.rocketmq.rocketmq.admin.AdminClientService;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.BrokerStatsDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.BrokerSummaryDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ClusterInfoDTO;
 import org.junit.jupiter.api.DisplayName;
@@ -17,8 +18,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 
 /**
- * 集群拓扑 MCP 工具单元测试。
- * 验证 rocketmq_cluster_info 工具调用与数据封装逻辑。
+ * 集群拓扑与 Broker 指标 MCP 工具单元测试。
+ * 验证 rocketmq_cluster_info 与 rocketmq_broker_stats 工具调用与数据封装逻辑。
  *
  * @author Ateng
  * @since 2026-10-04
@@ -57,5 +58,24 @@ class ClusterToolsTest {
         assertThat(result.getClusterTable()).containsKey("DefaultCluster");
         assertThat(result.getBrokers()).hasSize(2);
         assertThat(result.getBrokers().getFirst().getRole()).isEqualTo("MASTER");
+    }
+
+    @Test
+    @DisplayName("验证 rocketmq_broker_stats 工具调用成功返回 Broker 运行时指标")
+    void shouldReturnBrokerStatsSuccessfully() throws Exception {
+        BrokerStatsDTO mockStats = new BrokerStatsDTO("192.168.1.10:10911", "broker-a");
+        mockStats.setPutTps("150.0");
+        mockStats.setGetTransferredTps("280.5");
+        mockStats.setCommitLogDiskRatio("0.38");
+
+        when(adminClientService.getBrokerStats("broker-a")).thenReturn(mockStats);
+
+        BrokerStatsDTO result = clusterTools.getBrokerStats("broker-a");
+
+        assertThat(result).isNotNull();
+        assertThat(result.getBrokerAddr()).isEqualTo("192.168.1.10:10911");
+        assertThat(result.getPutTps()).isEqualTo("150.0");
+        assertThat(result.getGetTransferredTps()).isEqualTo("280.5");
+        assertThat(result.getCommitLogDiskRatio()).isEqualTo("0.38");
     }
 }

@@ -1,9 +1,14 @@
 package com.ateng.mcp.rocketmq.rocketmq.admin;
 
 import com.ateng.mcp.rocketmq.config.RocketmqProperties;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.BrokerStatsDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.BrokerSummaryDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ClusterInfoDTO;
+import org.apache.rocketmq.remoting.exception.RemotingConnectException;
+import org.apache.rocketmq.remoting.exception.RemotingSendRequestException;
+import org.apache.rocketmq.remoting.exception.RemotingTimeoutException;
 import org.apache.rocketmq.remoting.protocol.body.ClusterInfo;
+import org.apache.rocketmq.remoting.protocol.body.KVTable;
 import org.apache.rocketmq.remoting.protocol.route.BrokerData;
 import org.apache.rocketmq.tools.admin.DefaultMQAdminExt;
 import org.slf4j.Logger;
@@ -21,7 +26,7 @@ import java.util.Set;
 
 /**
  * RocketMQ 运维管理客户端服务默认实现。
- * 负责管理 DefaultMQAdminExt 单例生命周期并提供对集群底层元数据的安全转换访问。
+ * 负责管理 DefaultMQAdminExt 单例生命周期、自愈重连并提供对集群底层元数据与指标的安全转换访问。
  *
  * @author Ateng
  * @since 2026-10-04
@@ -49,7 +54,7 @@ public class DefaultAdminClientService implements AdminClientService, Initializi
             return;
         }
         try {
-            this.mqAdminExt = new DefaultMQAdminExt();
+            this.mqAdminExt = createMQAdminExt();
             this.mqAdminExt.setNamesrvAddr(properties.getNamesrvAddr());
             this.mqAdminExt.setInstanceName("mcp-admin-" + System.currentTimeMillis());
             this.mqAdminExt.start();
@@ -60,7 +65,29 @@ public class DefaultAdminClientService implements AdminClientService, Initializi
         }
     }
 
-    private synchronized DefaultMQAdminExt ensureStarted() throws Exception {
+    /**
+     * 工厂方法创建 DefaultMQAdminExt 实例，便于单元测试子类插桩。
+     *
+     * @return 新建的 DefaultMQAdminExt 客户端
+     */
+    protected DefaultMQAdminExt createMQAdminExt() {
+        return new DefaultMQAdminExt();
+    }
+
+    public synchronized void reconnect() {
+        if (mqAdminExt != null) {
+            try {
+                mqAdminExt.shutdown();
+            } catch (Exception e) {
+                log.debug("Swallowed exception during client shutdown before reconnect: {}", e.getMessage());
+            }
+            mqAdminExt = null;
+        }
+        started = false;
+        initAdminClient();
+    }
+
+    protected synchronized DefaultMQAdminExt ensureStarted() throws Exception {
         if (!started || mqAdminExt == null) {
             initAdminClient();
         }
@@ -72,8 +99,15 @@ public class DefaultAdminClientService implements AdminClientService, Initializi
 
     @Override
     public ClusterInfo examineBrokerClusterInfo() throws Exception {
-        DefaultMQAdminExt client = ensureStarted();
-        return client.examineBrokerClusterInfo();
+        try {
+            DefaultMQAdminExt client = ensureStarted();
+            return client.examineBrokerClusterInfo();
+        } catch (RemotingConnectException | RemotingTimeoutException | RemotingSendRequestException e) {
+            log.warn("Connection lost when examining cluster info. Triggering self-healing reconnect: {}", e.getMessage());
+            reconnect();
+            DefaultMQAdminExt client = ensureStarted();
+            return client.examineBrokerClusterInfo();
+        }
     }
 
     @Override
@@ -132,6 +166,78 @@ public class DefaultAdminClientService implements AdminClientService, Initializi
         dto.setTotalSlaves(slaveCount);
 
         return dto;
+    }
+
+    @Override
+    public BrokerStatsDTO getBrokerStats(String brokerAddr) throws Exception {
+        if (brokerAddr == null || brokerAddr.isBlank()) {
+            throw new IllegalArgumentException("brokerAddr 不能为空");
+        }
+
+        String targetAddr = resolveBrokerAddress(brokerAddr.trim());
+        KVTable kvTable;
+        try {
+            DefaultMQAdminExt client = ensureStarted();
+            kvTable = client.fetchBrokerRuntimeStats(targetAddr);
+        } catch (RemotingConnectException | RemotingTimeoutException | RemotingSendRequestException e) {
+            log.warn("Connection lost when fetching broker stats from {}. Triggering self-healing reconnect: {}", targetAddr, e.getMessage());
+            reconnect();
+            DefaultMQAdminExt client = ensureStarted();
+            kvTable = client.fetchBrokerRuntimeStats(targetAddr);
+        }
+
+        String brokerName = targetAddr.equals(brokerAddr.trim()) ? null : brokerAddr.trim();
+        BrokerStatsDTO dto = new BrokerStatsDTO(targetAddr, brokerName);
+        if (kvTable != null && kvTable.getTable() != null) {
+            Map<String, String> table = kvTable.getTable();
+            dto.setTable(new HashMap<>(table));
+            dto.setPutTps(table.getOrDefault("putTps", "0.0"));
+            dto.setGetTransferredTps(table.getOrDefault("getTransferredTps", "0.0"));
+            dto.setInTotalTps(table.getOrDefault("inTotalTps", "0.0"));
+            dto.setOutTotalTps(table.getOrDefault("outTotalTps", "0.0"));
+            dto.setCommitLogDiskRatio(table.getOrDefault("commitLogDiskRatio", "0.0"));
+            dto.setRuntime(table.getOrDefault("runtime", "unknown"));
+
+            String bootTimeStr = table.get("bootTimestamp");
+            if (bootTimeStr != null && !bootTimeStr.isBlank()) {
+                try {
+                    dto.setBootTimestamp(Long.parseLong(bootTimeStr));
+                } catch (NumberFormatException e) {
+                    log.debug("Failed to parse bootTimestamp: {}", bootTimeStr);
+                }
+            }
+        }
+        return dto;
+    }
+
+    /**
+     * 将 Broker 标识解析为实际的网络通信地址。若入参仅为 Broker 名称则从集群路由表检索 Master 物理地址。
+     *
+     * @param brokerAddrOrName Broker 网络地址（IP:PORT）或实例名称
+     * @return 实际通信的目标物理网络地址
+     */
+    public String resolveBrokerAddress(String brokerAddrOrName) {
+        if (brokerAddrOrName.contains(":")) {
+            return brokerAddrOrName;
+        }
+        try {
+            ClusterInfo clusterInfo = examineBrokerClusterInfo();
+            if (clusterInfo != null && clusterInfo.getBrokerAddrTable() != null) {
+                BrokerData brokerData = clusterInfo.getBrokerAddrTable().get(brokerAddrOrName);
+                if (brokerData != null && brokerData.getBrokerAddrs() != null) {
+                    String masterAddr = brokerData.getBrokerAddrs().get(0L);
+                    if (masterAddr != null && !masterAddr.isBlank()) {
+                        return masterAddr;
+                    }
+                    if (!brokerData.getBrokerAddrs().isEmpty()) {
+                        return brokerData.getBrokerAddrs().values().iterator().next();
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to resolve broker address by name {}: {}", brokerAddrOrName, e.getMessage());
+        }
+        return brokerAddrOrName;
     }
 
     @Override

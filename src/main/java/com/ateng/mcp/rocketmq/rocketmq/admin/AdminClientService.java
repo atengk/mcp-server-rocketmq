@@ -1,5 +1,6 @@
 package com.ateng.mcp.rocketmq.rocketmq.admin;
 
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.BrokerStatsDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ClusterInfoDTO;
 import org.apache.rocketmq.remoting.protocol.body.ClusterInfo;
 import org.apache.rocketmq.tools.admin.DefaultMQAdminExt;
@@ -28,6 +29,15 @@ public interface AdminClientService {
      * @throws Exception 当底层通讯或数据解析失败时抛出
      */
     ClusterInfoDTO getClusterInfo() throws Exception;
+
+    /**
+     * 获取指定 Broker 节点的核心运行时指标与物理磁盘水位。
+     *
+     * @param brokerAddr Broker 网络通信地址（IP:PORT）或 Broker 名称
+     * @return 格式化后的 BrokerStatsDTO 实例
+     * @throws Exception 当底层通信或指标提取异常时抛出
+     */
+    BrokerStatsDTO getBrokerStats(String brokerAddr) throws Exception;
 
     /**
      * 获取受管的 DefaultMQAdminExt 单例实例。
