@@ -5,9 +5,12 @@ import com.ateng.mcp.rocketmq.mcp.resource.ServerResources;
 import com.ateng.mcp.rocketmq.mcp.resource.TopicResources;
 import com.ateng.mcp.rocketmq.mcp.tool.ClusterTools;
 import com.ateng.mcp.rocketmq.mcp.tool.ConsumerTools;
+import com.ateng.mcp.rocketmq.mcp.tool.MessageProduceTools;
 import com.ateng.mcp.rocketmq.mcp.tool.MessageTools;
 import com.ateng.mcp.rocketmq.mcp.tool.TopicTools;
 import com.ateng.mcp.rocketmq.rocketmq.admin.AdminClientService;
+import com.ateng.mcp.rocketmq.rocketmq.messaging.MessagingClientService;
+import com.ateng.mcp.rocketmq.rocketmq.messaging.dto.SendMessageResultDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.BrokerStatsDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.BrokerSummaryDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ClusterInfoDTO;
@@ -36,6 +39,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 /**
@@ -52,6 +56,9 @@ class McpServerRocketmqApplicationTests {
     @MockitoBean
     private AdminClientService adminClientService;
 
+    @MockitoBean
+    private MessagingClientService messagingClientService;
+
     @Autowired
     private ClusterTools clusterTools;
 
@@ -63,6 +70,9 @@ class McpServerRocketmqApplicationTests {
 
     @Autowired
     private MessageTools messageTools;
+
+    @Autowired
+    private MessageProduceTools messageProduceTools;
 
     @Autowired
     private ServerResources serverResources;
@@ -227,6 +237,34 @@ class McpServerRocketmqApplicationTests {
     }
 
     @Test
+    @DisplayName("验证 Spring 上下文成功装配 MessageProduceTools 并执行端到端消息发送工具回调")
+    void shouldExecuteMessageProduceToolsCallback() throws Exception {
+        SendMessageResultDTO mockResult = new SendMessageResultDTO(
+                "01000000000000000000000000000000",
+                "OrderTopic",
+                "SEND_OK"
+        );
+        mockResult.setTag("TagA");
+        mockResult.setKeys("KEY123");
+        when(messagingClientService.sendMessage("OrderTopic", "Hello integration test", "TagA", "KEY123", null, null))
+                .thenReturn(mockResult);
+
+        SendMessageResultDTO result = messageProduceTools.sendMessage(
+                "OrderTopic",
+                "Hello integration test",
+                "TagA",
+                "KEY123",
+                null,
+                null,
+                null
+        );
+
+        assertThat(result).isNotNull();
+        assertThat(result.getMessageId()).isEqualTo("01000000000000000000000000000000");
+        assertThat(result.getStatus()).isEqualTo("SEND_OK");
+    }
+
+    @Test
     @DisplayName("验证 ServerResources 与 ClusterResources 可在集成上下文中输出格式化 JSON 状态与拓扑")
     void shouldReadResourcesSuccessfully() throws Exception {
         String statusJson = serverResources.getServerStatus();
@@ -244,12 +282,12 @@ class McpServerRocketmqApplicationTests {
     }
 
     @Test
-    @DisplayName("验证 Spring AI MCP 框架自动扫描并注册 13 项 Tools 与 3 项 Resources 至分发层")
+    @DisplayName("验证 Spring AI MCP 框架自动扫描并注册 14 项 Tools 与 3 项 Resources 至分发层")
     void shouldRegisterMcpToolsAndResourcesWithSpringAi() {
         assertThat(mcpSyncServer).isNotNull();
 
         List<McpSchema.Tool> tools = mcpSyncServer.listTools();
-        assertThat(tools).isNotNull().hasSizeGreaterThanOrEqualTo(13);
+        assertThat(tools).isNotNull().hasSizeGreaterThanOrEqualTo(14);
         assertThat(tools).anyMatch(tool -> "rocketmq_cluster_info".equals(tool.name()));
         assertThat(tools).anyMatch(tool -> "rocketmq_broker_stats".equals(tool.name()));
         assertThat(tools).anyMatch(tool -> "rocketmq_list_topics".equals(tool.name()));
@@ -263,6 +301,7 @@ class McpServerRocketmqApplicationTests {
         assertThat(tools).anyMatch(tool -> "rocketmq_query_message_by_key".equals(tool.name()));
         assertThat(tools).anyMatch(tool -> "rocketmq_query_dlq_messages".equals(tool.name()));
         assertThat(tools).anyMatch(tool -> "rocketmq_query_message_trace".equals(tool.name()));
+        assertThat(tools).anyMatch(tool -> "rocketmq_send_message".equals(tool.name()));
 
         List<McpSchema.Resource> resources = mcpSyncServer.listResources();
         assertThat(resources).isNotNull().hasSizeGreaterThanOrEqualTo(3);
