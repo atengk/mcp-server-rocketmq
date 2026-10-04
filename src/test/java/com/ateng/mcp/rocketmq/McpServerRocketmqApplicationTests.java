@@ -4,11 +4,17 @@ import com.ateng.mcp.rocketmq.mcp.resource.ClusterResources;
 import com.ateng.mcp.rocketmq.mcp.resource.ServerResources;
 import com.ateng.mcp.rocketmq.mcp.resource.TopicResources;
 import com.ateng.mcp.rocketmq.mcp.tool.ClusterTools;
+import com.ateng.mcp.rocketmq.mcp.tool.ConsumerTools;
 import com.ateng.mcp.rocketmq.mcp.tool.TopicTools;
 import com.ateng.mcp.rocketmq.rocketmq.admin.AdminClientService;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.BrokerStatsDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.BrokerSummaryDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ClusterInfoDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerConnectionDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerGroupListDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerLagDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerLagSummaryDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopConsumerLagDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicListDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicOverviewDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicRouteDTO;
@@ -46,6 +52,9 @@ class McpServerRocketmqApplicationTests {
 
     @Autowired
     private TopicTools topicTools;
+
+    @Autowired
+    private ConsumerTools consumerTools;
 
     @Autowired
     private ServerResources serverResources;
@@ -125,6 +134,42 @@ class McpServerRocketmqApplicationTests {
     }
 
     @Test
+    @DisplayName("验证 Spring 上下文成功装配 ConsumerTools 并执行端到端消费组工具回调")
+    void shouldExecuteConsumerToolsCallback() throws Exception {
+        ConsumerGroupListDTO mockGroups = new ConsumerGroupListDTO(List.of("demo_consumer_group"));
+        when(adminClientService.listConsumerGroups(false)).thenReturn(mockGroups);
+
+        ConsumerGroupListDTO listResult = consumerTools.listConsumerGroups(false);
+        assertThat(listResult).isNotNull();
+        assertThat(listResult.getGroups()).containsExactly("demo_consumer_group");
+
+        ConsumerConnectionDTO mockConn = new ConsumerConnectionDTO("demo_consumer_group");
+        mockConn.setTotalClients(1);
+        when(adminClientService.getConsumerStatus("demo_consumer_group")).thenReturn(mockConn);
+
+        ConsumerConnectionDTO statusResult = consumerTools.getConsumerStatus("demo_consumer_group");
+        assertThat(statusResult).isNotNull();
+        assertThat(statusResult.getTotalClients()).isEqualTo(1);
+
+        ConsumerLagDTO mockLag = new ConsumerLagDTO("demo_consumer_group");
+        mockLag.setTotalLag(1234L);
+        when(adminClientService.getConsumerLag("demo_consumer_group", null)).thenReturn(mockLag);
+
+        ConsumerLagDTO lagResult = consumerTools.getConsumerLag("demo_consumer_group", null);
+        assertThat(lagResult).isNotNull();
+        assertThat(lagResult.getTotalLag()).isEqualTo(1234L);
+
+        ConsumerLagSummaryDTO summary = new ConsumerLagSummaryDTO("demo_consumer_group", 1234L, 20.0);
+        TopConsumerLagDTO mockTop = new TopConsumerLagDTO(1, List.of(summary));
+        when(adminClientService.getTopConsumerLag(10)).thenReturn(mockTop);
+
+        TopConsumerLagDTO topResult = consumerTools.getTopConsumerLag(10);
+        assertThat(topResult).isNotNull();
+        assertThat(topResult.getTopLags()).hasSize(1);
+        assertThat(topResult.getTopLags().getFirst().getConsumerGroup()).isEqualTo("demo_consumer_group");
+    }
+
+    @Test
     @DisplayName("验证 ServerResources 与 ClusterResources 可在集成上下文中输出格式化 JSON 状态与拓扑")
     void shouldReadResourcesSuccessfully() throws Exception {
         String statusJson = serverResources.getServerStatus();
@@ -142,17 +187,21 @@ class McpServerRocketmqApplicationTests {
     }
 
     @Test
-    @DisplayName("验证 Spring AI MCP 框架自动扫描并注册 5 项 Tools 与 3 项 Resources 至分发层")
+    @DisplayName("验证 Spring AI MCP 框架自动扫描并注册 9 项 Tools 与 3 项 Resources 至分发层")
     void shouldRegisterMcpToolsAndResourcesWithSpringAi() {
         assertThat(mcpSyncServer).isNotNull();
 
         List<McpSchema.Tool> tools = mcpSyncServer.listTools();
-        assertThat(tools).isNotNull().hasSizeGreaterThanOrEqualTo(5);
+        assertThat(tools).isNotNull().hasSizeGreaterThanOrEqualTo(9);
         assertThat(tools).anyMatch(tool -> "rocketmq_cluster_info".equals(tool.name()));
         assertThat(tools).anyMatch(tool -> "rocketmq_broker_stats".equals(tool.name()));
         assertThat(tools).anyMatch(tool -> "rocketmq_list_topics".equals(tool.name()));
         assertThat(tools).anyMatch(tool -> "rocketmq_topic_route".equals(tool.name()));
         assertThat(tools).anyMatch(tool -> "rocketmq_topic_status".equals(tool.name()));
+        assertThat(tools).anyMatch(tool -> "rocketmq_list_consumer_groups".equals(tool.name()));
+        assertThat(tools).anyMatch(tool -> "rocketmq_consumer_status".equals(tool.name()));
+        assertThat(tools).anyMatch(tool -> "rocketmq_consumer_lag".equals(tool.name()));
+        assertThat(tools).anyMatch(tool -> "rocketmq_top_consumer_lag".equals(tool.name()));
 
         List<McpSchema.Resource> resources = mcpSyncServer.listResources();
         assertThat(resources).isNotNull().hasSizeGreaterThanOrEqualTo(3);

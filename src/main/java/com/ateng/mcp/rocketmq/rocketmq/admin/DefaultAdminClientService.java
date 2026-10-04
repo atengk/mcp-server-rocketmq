@@ -4,23 +4,39 @@ import com.ateng.mcp.rocketmq.config.RocketmqProperties;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.BrokerStatsDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.BrokerSummaryDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ClusterInfoDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerClientDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerConnectionDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerGroupListDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerLagDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerLagSummaryDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerQueueLagDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.QueueDataDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.SubscriptionDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopConsumerLagDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicListDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicOverviewDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicQueueOffsetDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicRouteDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicStatusDTO;
+import com.ateng.mcp.rocketmq.rocketmq.util.ConsumerGroupFilterUtils;
 import com.ateng.mcp.rocketmq.rocketmq.util.TopicFilterUtils;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import org.apache.rocketmq.common.message.MessageQueue;
 import org.apache.rocketmq.remoting.exception.RemotingConnectException;
 import org.apache.rocketmq.remoting.exception.RemotingSendRequestException;
 import org.apache.rocketmq.remoting.exception.RemotingTimeoutException;
+import org.apache.rocketmq.remoting.protocol.admin.ConsumeStats;
+import org.apache.rocketmq.remoting.protocol.admin.OffsetWrapper;
 import org.apache.rocketmq.remoting.protocol.admin.TopicOffset;
 import org.apache.rocketmq.remoting.protocol.admin.TopicStatsTable;
 import org.apache.rocketmq.remoting.protocol.body.ClusterInfo;
+import org.apache.rocketmq.remoting.protocol.body.Connection;
+import org.apache.rocketmq.remoting.protocol.body.ConsumerConnection;
 import org.apache.rocketmq.remoting.protocol.body.KVTable;
+import org.apache.rocketmq.remoting.protocol.body.SubscriptionGroupWrapper;
 import org.apache.rocketmq.remoting.protocol.body.TopicList;
+import org.apache.rocketmq.remoting.protocol.heartbeat.SubscriptionData;
 import org.apache.rocketmq.remoting.protocol.route.BrokerData;
 import org.apache.rocketmq.remoting.protocol.route.QueueData;
 import org.apache.rocketmq.remoting.protocol.route.TopicRouteData;
@@ -413,6 +429,226 @@ public class DefaultAdminClientService implements AdminClientService, Initializi
             }
         }
         return new TopicOverviewDTO(summaries);
+    }
+
+    @Override
+    public ConsumerGroupListDTO listConsumerGroups(boolean includeSystem) throws Exception {
+        ClusterInfo clusterInfo;
+        try {
+            clusterInfo = examineBrokerClusterInfo();
+        } catch (Exception e) {
+            log.warn("Failed to examine cluster info when listing consumer groups: {}", e.getMessage());
+            clusterInfo = null;
+        }
+
+        Set<String> allGroups = new HashSet<>();
+        if (clusterInfo != null && clusterInfo.getBrokerAddrTable() != null) {
+            for (BrokerData bd : clusterInfo.getBrokerAddrTable().values()) {
+                if (bd != null && bd.getBrokerAddrs() != null) {
+                    String masterAddr = bd.getBrokerAddrs().get(0L);
+                    if (masterAddr != null && !masterAddr.isBlank()) {
+                        try {
+                            DefaultMQAdminExt client = ensureStarted();
+                            SubscriptionGroupWrapper wrapper = client.getAllSubscriptionGroup(masterAddr, 3000L);
+                            if (wrapper != null && wrapper.getSubscriptionGroupTable() != null) {
+                                allGroups.addAll(wrapper.getSubscriptionGroupTable().keySet());
+                            }
+                        } catch (RemotingConnectException | RemotingTimeoutException | RemotingSendRequestException e) {
+                            log.warn("Connection lost when fetching subscription groups from {}. Triggering reconnect: {}", masterAddr, e.getMessage());
+                            reconnect();
+                            try {
+                                DefaultMQAdminExt client = ensureStarted();
+                                SubscriptionGroupWrapper wrapper = client.getAllSubscriptionGroup(masterAddr, 3000L);
+                                if (wrapper != null && wrapper.getSubscriptionGroupTable() != null) {
+                                    allGroups.addAll(wrapper.getSubscriptionGroupTable().keySet());
+                                }
+                            } catch (Exception ex) {
+                                log.warn("Retry failed to fetch subscription groups from {}: {}", masterAddr, ex.getMessage());
+                            }
+                        } catch (Exception e) {
+                            log.warn("Failed to fetch subscription groups from {}: {}", masterAddr, e.getMessage());
+                        }
+                    }
+                }
+            }
+        }
+
+        List<String> resultGroups;
+        if (includeSystem) {
+            resultGroups = allGroups.stream()
+                    .filter(g -> g != null && !g.isBlank())
+                    .sorted()
+                    .collect(Collectors.toList());
+        } else {
+            resultGroups = ConsumerGroupFilterUtils.filterBusinessConsumerGroups(allGroups);
+        }
+
+        return new ConsumerGroupListDTO(resultGroups);
+    }
+
+    @Override
+    public ConsumerConnectionDTO getConsumerStatus(String consumerGroup) throws Exception {
+        if (consumerGroup == null || consumerGroup.isBlank()) {
+            throw new IllegalArgumentException("consumerGroup 不能为空");
+        }
+
+        String targetGroup = consumerGroup.trim();
+        ConsumerConnection connection = null;
+        try {
+            DefaultMQAdminExt client = ensureStarted();
+            connection = client.examineConsumerConnectionInfo(targetGroup);
+        } catch (RemotingConnectException | RemotingTimeoutException | RemotingSendRequestException e) {
+            log.warn("Connection lost when examining consumer connection for {}. Triggering reconnect: {}", targetGroup, e.getMessage());
+            reconnect();
+            DefaultMQAdminExt client = ensureStarted();
+            connection = client.examineConsumerConnectionInfo(targetGroup);
+        } catch (Exception e) {
+            log.warn("Failed to examine consumer connection info for {}: {}", targetGroup, e.getMessage());
+        }
+
+        ConsumerConnectionDTO dto = new ConsumerConnectionDTO(targetGroup);
+        if (connection == null) {
+            return dto;
+        }
+
+        if (connection.getConsumeType() != null) {
+            dto.setConsumeType(connection.getConsumeType().name());
+        }
+        if (connection.getMessageModel() != null) {
+            dto.setMessageModel(connection.getMessageModel().name());
+        }
+        if (connection.getConsumeFromWhere() != null) {
+            dto.setConsumeFromWhere(connection.getConsumeFromWhere().name());
+        }
+
+        if (connection.getConnectionSet() != null) {
+            List<ConsumerClientDTO> clients = new ArrayList<>();
+            for (Connection conn : connection.getConnectionSet()) {
+                if (conn != null) {
+                    clients.add(new ConsumerClientDTO(
+                            conn.getClientId(),
+                            conn.getClientAddr(),
+                            conn.getLanguage() != null ? conn.getLanguage().name() : null,
+                            conn.getVersion()
+                    ));
+                }
+            }
+            dto.setClients(clients);
+        }
+
+        if (connection.getSubscriptionTable() != null) {
+            List<SubscriptionDTO> subscriptions = new ArrayList<>();
+            for (SubscriptionData subData : connection.getSubscriptionTable().values()) {
+                if (subData != null) {
+                    subscriptions.add(new SubscriptionDTO(
+                            subData.getTopic(),
+                            subData.getSubString(),
+                            subData.getTagsSet()
+                    ));
+                }
+            }
+            dto.setSubscriptions(subscriptions);
+        }
+
+        return dto;
+    }
+
+    @Override
+    public ConsumerLagDTO getConsumerLag(String consumerGroup, String topic) throws Exception {
+        if (consumerGroup == null || consumerGroup.isBlank()) {
+            throw new IllegalArgumentException("consumerGroup 不能为空");
+        }
+
+        String targetGroup = consumerGroup.trim();
+        String targetTopic = (topic != null && !topic.isBlank()) ? topic.trim() : null;
+
+        ConsumeStats stats = null;
+        try {
+            DefaultMQAdminExt client = ensureStarted();
+            if (targetTopic != null) {
+                stats = client.examineConsumeStats(targetGroup, targetTopic);
+            } else {
+                stats = client.examineConsumeStats(targetGroup);
+            }
+        } catch (RemotingConnectException | RemotingTimeoutException | RemotingSendRequestException e) {
+            log.warn("Connection lost when examining consume stats for {}. Triggering reconnect: {}", targetGroup, e.getMessage());
+            reconnect();
+            DefaultMQAdminExt client = ensureStarted();
+            if (targetTopic != null) {
+                stats = client.examineConsumeStats(targetGroup, targetTopic);
+            } else {
+                stats = client.examineConsumeStats(targetGroup);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to examine consume stats for {} / topic {}: {}", targetGroup, targetTopic, e.getMessage());
+        }
+
+        ConsumerLagDTO dto = new ConsumerLagDTO(targetGroup);
+        dto.setTopic(targetTopic);
+
+        if (stats == null || stats.getOffsetTable() == null || stats.getOffsetTable().isEmpty()) {
+            return dto;
+        }
+
+        dto.setConsumeTps(stats.getConsumeTps());
+
+        List<ConsumerQueueLagDTO> queueLags = new ArrayList<>();
+        long totalLag = 0;
+        for (Map.Entry<MessageQueue, OffsetWrapper> entry : stats.getOffsetTable().entrySet()) {
+            MessageQueue mq = entry.getKey();
+            OffsetWrapper ow = entry.getValue();
+            if (mq == null || ow == null) {
+                continue;
+            }
+
+            long bOffset = ow.getBrokerOffset();
+            long cOffset = ow.getConsumerOffset();
+            long lag = Math.max(0, bOffset - cOffset);
+            totalLag += lag;
+
+            queueLags.add(new ConsumerQueueLagDTO(
+                    mq.getTopic(),
+                    mq.getBrokerName(),
+                    mq.getQueueId(),
+                    bOffset,
+                    cOffset,
+                    ow.getLastTimestamp()
+            ));
+        }
+
+        dto.setTotalLag(totalLag);
+        dto.setQueues(queueLags);
+        return dto;
+    }
+
+    @Override
+    public TopConsumerLagDTO getTopConsumerLag(int topN) throws Exception {
+        int limit = topN <= 0 ? 10 : topN;
+        ConsumerGroupListDTO groupListDTO = listConsumerGroups(false);
+        List<String> groups = groupListDTO.getGroups();
+
+        List<ConsumerLagSummaryDTO> summaries = new ArrayList<>();
+        for (String group : groups) {
+            if (group == null || group.isBlank()) {
+                continue;
+            }
+            try {
+                DefaultMQAdminExt client = ensureStarted();
+                ConsumeStats stats = client.examineConsumeStats(group.trim());
+                long totalDiff = stats != null ? stats.computeTotalDiff() : 0L;
+                double tps = stats != null ? stats.getConsumeTps() : 0.0;
+                summaries.add(new ConsumerLagSummaryDTO(group.trim(), totalDiff, tps));
+            } catch (Exception e) {
+                // 当消费组离线或无对应 Topic 统计时，计为 0 积压并防御日志风暴
+                log.debug("Consumer group {} has no active consume stats: {}", group, e.getMessage());
+                summaries.add(new ConsumerLagSummaryDTO(group.trim(), 0L, 0.0));
+            }
+        }
+
+        summaries.sort((a, b) -> Long.compare(b.getTotalLag(), a.getTotalLag()));
+        List<ConsumerLagSummaryDTO> topResults = summaries.stream().limit(limit).collect(Collectors.toList());
+
+        return new TopConsumerLagDTO(groupListDTO.getTotalCount(), topResults);
     }
 
     /**

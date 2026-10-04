@@ -2,6 +2,10 @@ package com.ateng.mcp.rocketmq.rocketmq.admin;
 
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.BrokerStatsDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ClusterInfoDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerConnectionDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerGroupListDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerLagDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopConsumerLagDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicListDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicOverviewDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicRouteDTO;
@@ -77,6 +81,43 @@ public interface AdminClientService {
      * @throws Exception 当底层通信或查询异常时抛出
      */
     TopicOverviewDTO getTopicsOverview() throws Exception;
+
+    /**
+     * 查询集群消费组列表。
+     *
+     * @param includeSystem 是否包含系统内置保留消费组（默认为 false）
+     * @return 格式化后的 ConsumerGroupListDTO 实例
+     * @throws Exception 当底层通信或查询异常时抛出
+     */
+    ConsumerGroupListDTO listConsumerGroups(boolean includeSystem) throws Exception;
+
+    /**
+     * 查询指定消费组的在线客户端连接与订阅健康度状态。
+     *
+     * @param consumerGroup 消费组名称
+     * @return 格式化后的 ConsumerConnectionDTO 实例
+     * @throws Exception 当底层通信或查询异常时抛出
+     */
+    ConsumerConnectionDTO getConsumerStatus(String consumerGroup) throws Exception;
+
+    /**
+     * 查询指定消费组各分片队列的消费点位、最大位点与实时积压量 (Lag)。
+     *
+     * @param consumerGroup 消费组名称
+     * @param topic 指定过滤的主题名称（可选，若为空则包含所有订阅主题）
+     * @return 格式化后的 ConsumerLagDTO 实例
+     * @throws Exception 当底层通信或计算异常时抛出
+     */
+    ConsumerLagDTO getConsumerLag(String consumerGroup, String topic) throws Exception;
+
+    /**
+     * 查询全集群业务消费组总未消费积压量降序排列的 TopN 排行榜。
+     *
+     * @param topN 截取数量，小于等于 0 时默认为 10
+     * @return 格式化后的 TopConsumerLagDTO 实例
+     * @throws Exception 当底层通信或计算异常时抛出
+     */
+    TopConsumerLagDTO getTopConsumerLag(int topN) throws Exception;
 
     /**
      * 获取受管的 DefaultMQAdminExt 单例实例。

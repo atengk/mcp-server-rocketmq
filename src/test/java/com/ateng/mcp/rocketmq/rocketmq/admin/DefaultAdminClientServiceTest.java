@@ -3,26 +3,41 @@ package com.ateng.mcp.rocketmq.rocketmq.admin;
 import com.ateng.mcp.rocketmq.config.RocketmqProperties;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.BrokerStatsDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ClusterInfoDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerConnectionDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerGroupListDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.ConsumerLagDTO;
+import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopConsumerLagDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicListDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicOverviewDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicRouteDTO;
 import com.ateng.mcp.rocketmq.rocketmq.admin.dto.TopicStatusDTO;
+import org.apache.rocketmq.remoting.protocol.admin.ConsumeStats;
+import org.apache.rocketmq.remoting.protocol.admin.OffsetWrapper;
 import org.apache.rocketmq.remoting.protocol.admin.TopicOffset;
 import org.apache.rocketmq.remoting.protocol.admin.TopicStatsTable;
+import org.apache.rocketmq.common.consumer.ConsumeFromWhere;
 import org.apache.rocketmq.common.message.MessageQueue;
 import org.apache.rocketmq.remoting.exception.RemotingConnectException;
 import org.apache.rocketmq.remoting.protocol.body.ClusterInfo;
+import org.apache.rocketmq.remoting.protocol.body.Connection;
+import org.apache.rocketmq.remoting.protocol.body.ConsumerConnection;
 import org.apache.rocketmq.remoting.protocol.body.KVTable;
+import org.apache.rocketmq.remoting.protocol.body.SubscriptionGroupWrapper;
 import org.apache.rocketmq.remoting.protocol.body.TopicList;
+import org.apache.rocketmq.remoting.protocol.heartbeat.ConsumeType;
+import org.apache.rocketmq.remoting.protocol.heartbeat.MessageModel;
+import org.apache.rocketmq.remoting.protocol.heartbeat.SubscriptionData;
 import org.apache.rocketmq.remoting.protocol.route.BrokerData;
 import org.apache.rocketmq.remoting.protocol.route.QueueData;
 import org.apache.rocketmq.remoting.protocol.route.TopicRouteData;
+import org.apache.rocketmq.remoting.protocol.subscription.SubscriptionGroupConfig;
 import org.apache.rocketmq.tools.admin.DefaultMQAdminExt;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -326,6 +341,198 @@ class DefaultAdminClientServiceTest {
         assertThat(summary.getTotalReadQueues()).isEqualTo(4);
         assertThat(summary.getTotalWriteQueues()).isEqualTo(4);
         assertThat(summary.getBrokers()).containsExactly("broker-a");
+    }
+
+    @Test
+    @DisplayName("验证 listConsumerGroups 正确从 Broker 提取消费组并根据参数过滤系统保留组")
+    void shouldListConsumerGroupsFilteringSystemGroups() throws Exception {
+        RocketmqProperties properties = new RocketmqProperties();
+        DefaultMQAdminExt mockClient = mock(DefaultMQAdminExt.class);
+        TestableAdminClientService service = new TestableAdminClientService(properties, mockClient);
+
+        ClusterInfo clusterInfo = new ClusterInfo();
+        HashMap<String, BrokerData> brokerAddrTable = new HashMap<>();
+        BrokerData bd = new BrokerData();
+        bd.setBrokerName("broker-a");
+        HashMap<Long, String> addrs = new HashMap<>();
+        addrs.put(0L, "192.168.1.10:10911");
+        bd.setBrokerAddrs(addrs);
+        brokerAddrTable.put("broker-a", bd);
+        clusterInfo.setBrokerAddrTable(brokerAddrTable);
+
+        when(mockClient.examineBrokerClusterInfo()).thenReturn(clusterInfo);
+
+        SubscriptionGroupWrapper wrapper = new SubscriptionGroupWrapper();
+        ConcurrentHashMap<String, SubscriptionGroupConfig> subTable = new ConcurrentHashMap<>();
+        subTable.put("order_group", new SubscriptionGroupConfig());
+        subTable.put("pay_group", new SubscriptionGroupConfig());
+        subTable.put("TOOLS_CONSUMER", new SubscriptionGroupConfig());
+        wrapper.setSubscriptionGroupTable(subTable);
+
+        when(mockClient.getAllSubscriptionGroup("192.168.1.10:10911", 3000L)).thenReturn(wrapper);
+
+        // 默认过滤系统消费组
+        ConsumerGroupListDTO businessGroups = service.listConsumerGroups(false);
+        assertThat(businessGroups).isNotNull();
+        assertThat(businessGroups.getTotalCount()).isEqualTo(2);
+        assertThat(businessGroups.getGroups()).containsExactly("order_group", "pay_group");
+
+        // 包含系统消费组
+        ConsumerGroupListDTO allGroups = service.listConsumerGroups(true);
+        assertThat(allGroups).isNotNull();
+        assertThat(allGroups.getTotalCount()).isEqualTo(3);
+        assertThat(allGroups.getGroups()).contains("TOOLS_CONSUMER", "order_group", "pay_group");
+    }
+
+    @Test
+    @DisplayName("验证 getConsumerStatus 解析 ConsumerConnection 的客户端列表与订阅详情")
+    void shouldGetConsumerStatusCorrectly() throws Exception {
+        RocketmqProperties properties = new RocketmqProperties();
+        DefaultMQAdminExt mockClient = mock(DefaultMQAdminExt.class);
+        TestableAdminClientService service = new TestableAdminClientService(properties, mockClient);
+
+        ConsumerConnection conn = new ConsumerConnection();
+        conn.setConsumeType(ConsumeType.CONSUME_PASSIVELY);
+        conn.setMessageModel(MessageModel.CLUSTERING);
+        conn.setConsumeFromWhere(ConsumeFromWhere.CONSUME_FROM_LAST_OFFSET);
+
+        HashSet<Connection> connSet = new HashSet<>();
+        Connection c = new Connection();
+        c.setClientId("192.168.1.100@12345");
+        c.setClientAddr("192.168.1.100:54321");
+        c.setVersion(440);
+        connSet.add(c);
+        conn.setConnectionSet(connSet);
+
+        ConcurrentHashMap<String, SubscriptionData> subTable = new ConcurrentHashMap<>();
+        SubscriptionData sub = new SubscriptionData();
+        sub.setTopic("OrderTopic");
+        sub.setSubString("TagA || TagB");
+        sub.setTagsSet(Set.of("TagA", "TagB"));
+        subTable.put("OrderTopic", sub);
+        conn.setSubscriptionTable(subTable);
+
+        when(mockClient.examineConsumerConnectionInfo("order_group")).thenReturn(conn);
+
+        ConsumerConnectionDTO dto = service.getConsumerStatus("order_group");
+
+        assertThat(dto).isNotNull();
+        assertThat(dto.getConsumerGroup()).isEqualTo("order_group");
+        assertThat(dto.isOnline()).isTrue();
+        assertThat(dto.getConsumeType()).isEqualTo("CONSUME_PASSIVELY");
+        assertThat(dto.getMessageModel()).isEqualTo("CLUSTERING");
+        assertThat(dto.getClients()).hasSize(1);
+        assertThat(dto.getClients().getFirst().getClientId()).isEqualTo("192.168.1.100@12345");
+        assertThat(dto.getSubscriptions()).hasSize(1);
+        assertThat(dto.getSubscriptions().getFirst().getTopic()).isEqualTo("OrderTopic");
+        assertThat(dto.getSubscriptions().getFirst().getTagsSet()).contains("TagA", "TagB");
+    }
+
+    @Test
+    @DisplayName("验证 getConsumerLag 精确计算各分片队列 Lag 与消费组总堆积量")
+    void shouldGetConsumerLagCorrectly() throws Exception {
+        RocketmqProperties properties = new RocketmqProperties();
+        DefaultMQAdminExt mockClient = mock(DefaultMQAdminExt.class);
+        TestableAdminClientService service = new TestableAdminClientService(properties, mockClient);
+
+        ConsumeStats stats = new ConsumeStats();
+        stats.setConsumeTps(55.5);
+        HashMap<MessageQueue, OffsetWrapper> offsetTable = new HashMap<>();
+
+        MessageQueue mq0 = new MessageQueue("OrderTopic", "broker-a", 0);
+        OffsetWrapper ow0 = new OffsetWrapper();
+        ow0.setBrokerOffset(1000L);
+        ow0.setConsumerOffset(800L);
+        ow0.setLastTimestamp(1728000000000L);
+        offsetTable.put(mq0, ow0);
+
+        MessageQueue mq1 = new MessageQueue("OrderTopic", "broker-a", 1);
+        OffsetWrapper ow1 = new OffsetWrapper();
+        ow1.setBrokerOffset(2000L);
+        ow1.setConsumerOffset(1500L);
+        ow1.setLastTimestamp(1728000001000L);
+        offsetTable.put(mq1, ow1);
+
+        stats.setOffsetTable(offsetTable);
+
+        when(mockClient.examineConsumeStats("order_group", "OrderTopic")).thenReturn(stats);
+
+        ConsumerLagDTO dto = service.getConsumerLag("order_group", "OrderTopic");
+
+        assertThat(dto).isNotNull();
+        assertThat(dto.getConsumerGroup()).isEqualTo("order_group");
+        assertThat(dto.getTopic()).isEqualTo("OrderTopic");
+        assertThat(dto.getConsumeTps()).isEqualTo(55.5);
+        assertThat(dto.getTotalLag()).isEqualTo(700L); // (1000-800) + (2000-1500) = 200 + 500 = 700
+        assertThat(dto.getQueues()).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("验证 getTopConsumerLag 聚合全集群消费组堆积量并按降序截取 TopN")
+    void shouldGetTopConsumerLagCorrectly() throws Exception {
+        RocketmqProperties properties = new RocketmqProperties();
+        DefaultMQAdminExt mockClient = mock(DefaultMQAdminExt.class);
+        TestableAdminClientService service = new TestableAdminClientService(properties, mockClient);
+
+        ClusterInfo clusterInfo = new ClusterInfo();
+        HashMap<String, BrokerData> brokerAddrTable = new HashMap<>();
+        BrokerData bd = new BrokerData();
+        bd.setBrokerName("broker-a");
+        HashMap<Long, String> addrs = new HashMap<>();
+        addrs.put(0L, "192.168.1.10:10911");
+        bd.setBrokerAddrs(addrs);
+        brokerAddrTable.put("broker-a", bd);
+        clusterInfo.setBrokerAddrTable(brokerAddrTable);
+        when(mockClient.examineBrokerClusterInfo()).thenReturn(clusterInfo);
+
+        SubscriptionGroupWrapper wrapper = new SubscriptionGroupWrapper();
+        ConcurrentHashMap<String, SubscriptionGroupConfig> subTable = new ConcurrentHashMap<>();
+        subTable.put("group_low", new SubscriptionGroupConfig());
+        subTable.put("group_high", new SubscriptionGroupConfig());
+        wrapper.setSubscriptionGroupTable(subTable);
+        when(mockClient.getAllSubscriptionGroup("192.168.1.10:10911", 3000L)).thenReturn(wrapper);
+
+        ConsumeStats statsLow = new ConsumeStats();
+        HashMap<MessageQueue, OffsetWrapper> offsetTableLow = new HashMap<>();
+        OffsetWrapper owLow = new OffsetWrapper();
+        owLow.setBrokerOffset(100L);
+        owLow.setConsumerOffset(90L); // diff = 10
+        offsetTableLow.put(new MessageQueue("TopicA", "broker-a", 0), owLow);
+        statsLow.setOffsetTable(offsetTableLow);
+
+        ConsumeStats statsHigh = new ConsumeStats();
+        HashMap<MessageQueue, OffsetWrapper> offsetTableHigh = new HashMap<>();
+        OffsetWrapper owHigh = new OffsetWrapper();
+        owHigh.setBrokerOffset(10000L);
+        owHigh.setConsumerOffset(1000L); // diff = 9000
+        offsetTableHigh.put(new MessageQueue("TopicB", "broker-a", 0), owHigh);
+        statsHigh.setOffsetTable(offsetTableHigh);
+
+        when(mockClient.examineConsumeStats("group_low")).thenReturn(statsLow);
+        when(mockClient.examineConsumeStats("group_high")).thenReturn(statsHigh);
+
+        TopConsumerLagDTO topDto = service.getTopConsumerLag(5);
+
+        assertThat(topDto).isNotNull();
+        assertThat(topDto.getTotalEvaluatedGroups()).isEqualTo(2);
+        assertThat(topDto.getTopLags()).hasSize(2);
+        assertThat(topDto.getTopLags().get(0).getConsumerGroup()).isEqualTo("group_high");
+        assertThat(topDto.getTopLags().get(0).getTotalLag()).isEqualTo(9000L);
+        assertThat(topDto.getTopLags().get(1).getConsumerGroup()).isEqualTo("group_low");
+        assertThat(topDto.getTopLags().get(1).getTotalLag()).isEqualTo(10L);
+    }
+
+    @Test
+    @DisplayName("验证传入空白消费组参数时防御性抛出非法参数异常")
+    void shouldThrowExceptionWhenConsumerParamsAreBlank() {
+        RocketmqProperties properties = new RocketmqProperties();
+        DefaultMQAdminExt mockClient = mock(DefaultMQAdminExt.class);
+        TestableAdminClientService service = new TestableAdminClientService(properties, mockClient);
+
+        assertThatThrownBy(() -> service.getConsumerStatus("   "))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.getConsumerLag(null, "TestTopic"))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     private static class TestableAdminClientService extends DefaultAdminClientService {
