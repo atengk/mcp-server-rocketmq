@@ -59,3 +59,15 @@ _Avoid_: 日志追踪, 调用链
 **System Topic (系统主题)**:
 RocketMQ 内部保留的主题（如以 `%SYS%`、`TBW102`、`BenchmarkTest` 开头的主题），在 MCP 工具输出中默认被过滤屏蔽。
 _Avoid_: 内部消息, 内置队列
+
+**Multi-Stage Container Build (多阶段容器构建)**:
+分离源码编译与生产运行环境的容器构建范式。前置阶段基于 Maven 编译打包，运行时阶段采用极简 JRE 基础镜像并以非 root 专有低特权用户启动。
+_Avoid_: 单阶段粗暴打包, 宿主直接复制
+
+**GHCR Distribution (GHCR 镜像分发)**:
+依托 GitHub Container Registry 进行多架构（`linux/amd64`, `linux/arm64`）镜像托管与分发的标准化渠道。
+_Avoid_: 私有镜像站, 手工镜像分发
+
+**Release Artifact (发行版附件构件)**:
+随 Git Tag 自动化发版流程构建的可执行单一 Fat Jar 及其 SHA-256 完整性校验文件，供用户直接下载部署运行。
+_Avoid_: 源码压缩包, 中间构建包
