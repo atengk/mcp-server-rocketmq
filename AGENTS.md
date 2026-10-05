@@ -35,7 +35,16 @@
    - 完整提供 18 项 Tools、3 项 Resources (`rocketmq://...`) 与 2 项专家 Prompts；
    - 所有返回消息体的操作，必须施加 4KB 防爆截断与 UTF-8/Base64 安全解码；
 5. **管理客户端单例受管 (ADR 0005)**：
-   - `DefaultMQAdminExt` 统一由 Spring 容器作为单例 Bean 生命周期受管，严禁在 Tool 方法内部频繁创建与销毁。
+   - `DefaultMQAdminExt` 统一由 Spring 容器作为单例 Bean 生命周期受管，严禁在 Tool 方法内部频繁创建与销毁；
+6. **三位一体容器化与发版流水线 (ADR 0006)**：
+   - Docker 镜像采用 Temurin JRE 21 Alpine 多阶段构建，强制以非 root 用户 (`mcp:mcp`, UID 10001) 运行；
+   - 随 Tag 自动化发版，三轨分发：GitHub Release 挂载 Fat Jar 附件、GitHub Packages 发布 Maven 构件、GHCR 发布多架构容器镜像；
+7. **包命名空间与 Maven 坐标规范 (ADR 0007)**：
+   - 全局包名统一规范为 `io.github.atengk.mcp.rocketmq`；Maven GAV 坐标规范为 `io.github.atengk:mcp-server-rocketmq`；
+8. **客户端生命周期自愈与韧性加固 (ADR 0008)**：
+   - Remoting Admin 客户端引入 5000ms 重连冷却防抖与 ACL RPCHook 自动注入；
+   - gRPC 消息客户端具备 channel 损坏自愈重建机制；
+   - 消息体严格执行 4MB 前置体积防爆防御；创建 Topic 前置强校验活跃 Master 存活。
 
 ---
 

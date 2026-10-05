@@ -38,10 +38,10 @@ USER mcp
 # 默认运行时环境变量（默认以 SSE 网络模式启动，暴露 8080 端口）
 ENV SERVER_PORT=8080 \
     MCP_TRANSPORT=sse \
-    ROCKETMQ_NAMESRV_ADDR="127.0.0.1:9876" \
-    ROCKETMQ_ENDPOINTS="127.0.0.1:8081" \
-    ROCKETMQ_READ_ONLY=false \
-    ROCKETMQ_ENABLE_DESTRUCTIVE_TOOLS=false \
+    MCP_ROCKETMQ_NAMESRV_ADDR="127.0.0.1:9876" \
+    MCP_ROCKETMQ_ENDPOINTS="127.0.0.1:8081" \
+    MCP_ROCKETMQ_READ_ONLY=false \
+    MCP_ROCKETMQ_ENABLE_DESTRUCTIVE_TOOLS=false \
     JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -Djava.security.egd=file:/dev/./urandom"
 
 # 暴露 SSE 模式 HTTP 端口

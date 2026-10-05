@@ -1,13 +1,24 @@
+# ==============================================================================
+# Apache RocketMQ 5 MCP 控制面服务端全局配置
+# 支持通过环境变量 (MCP_ROCKETMQ_*)、命令行参数 (--rocketmq.*) 或 Spring Profiles 覆盖
+# ==============================================================================
+
 server:
-  port: ${SERVER_PORT:${PORT:8080}}
+  # 服务端口：优先读取 MCP_SERVER_PORT，兼容 SERVER_PORT / PORT，默认 8080
+  port: ${MCP_SERVER_PORT:${SERVER_PORT:${PORT:8080}}}
+  # 生产级优雅停机策略 (SIGTERM 信号处理)
+  shutdown: graceful
 
 spring:
   application:
     name: mcp-server-rocketmq
+  lifecycle:
+    # 优雅停机各生命周期阶段超时宽限时间
+    timeout-per-shutdown-phase: 20s
   ai:
     mcp:
       server:
-        name: mcp-server-rocketmq
+        name: ${MCP_SERVER_NAME:mcp-server-rocketmq}
         version: 1.0.0
         protocol: SSE
         sse:
@@ -15,9 +26,15 @@ spring:
           sse-message-endpoint: /mcp/message
 
 rocketmq:
-  namesrv-addr: ${ROCKETMQ_NAMESRV_ADDR:127.0.0.1:9876}
-  endpoints: ${ROCKETMQ_ENDPOINTS:127.0.0.1:8081}
-  access-key: ${ROCKETMQ_ACCESS_KEY:}
-  secret-key: ${ROCKETMQ_SECRET_KEY:}
-  read-only: ${ROCKETMQ_READ_ONLY:false}
-  enable-destructive-tools: ${ROCKETMQ_ENABLE_DESTRUCTIVE_TOOLS:false}
+  # Remoting 协议运维管理连接地址 (NameServer 集群，多地址以分号分隔)
+  namesrv-addr: ${MCP_ROCKETMQ_NAMESRV_ADDR:${ROCKETMQ_NAMESRV_ADDR:127.0.0.1:9876}}
+  # RocketMQ 5.x gRPC 协议消息投递端点 (Proxy 地址)
+  endpoints: ${MCP_ROCKETMQ_ENDPOINTS:${ROCKETMQ_ENDPOINTS:127.0.0.1:8081}}
+  # ACL 访问鉴权密钥 AccessKey（可选）
+  access-key: ${MCP_ROCKETMQ_ACCESS_KEY:${ROCKETMQ_ACCESS_KEY:}}
+  # ACL 访问鉴权密钥 SecretKey（可选）
+  secret-key: ${MCP_ROCKETMQ_SECRET_KEY:${ROCKETMQ_SECRET_KEY:}}
+  # 全局只读安全拦截守卫 (true: 彻底封锁所有消息发送与集群修改操作)
+  read-only: ${MCP_ROCKETMQ_READ_ONLY:${ROCKETMQ_READ_ONLY:false}}
+  # 破坏性高危操作全局激活开关 (双层防呆第一层，true: 允许调用删除主题与重置位点工具)
+  enable-destructive-tools: ${MCP_ROCKETMQ_ENABLE_DESTRUCTIVE_TOOLS:${ROCKETMQ_ENABLE_DESTRUCTIVE_TOOLS:false}}

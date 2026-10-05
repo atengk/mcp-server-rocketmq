@@ -13,7 +13,7 @@
 
     <groupId>io.github.atengk</groupId>
     <artifactId>mcp-server-rocketmq</artifactId>
-    <version>1.0.0-SNAPSHOT</version>
+    <version>1.0.0</version>
     <name>mcp-server-rocketmq</name>
     <description>Model Context Protocol Server for Apache RocketMQ 5</description>
 

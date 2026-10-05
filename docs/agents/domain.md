@@ -21,7 +21,10 @@
 │   ├── 0002-dual-layer-safety-guard.md
 │   ├── 0003-single-jar-dual-mode-transport.md
 │   ├── 0004-mcp-full-specification-and-body-truncation.md
-│   └── 0005-dependency-matrix-and-runtime-baseline.md
+│   ├── 0005-dependency-matrix-and-runtime-baseline.md
+│   ├── 0006-containerization-and-release-pipeline.md
+│   ├── 0007-package-namespace-and-maven-coordinates.md
+│   └── 0008-client-lifecycle-hardening-and-resilience.md
 └── src/                       # 业务源码
 ```
 

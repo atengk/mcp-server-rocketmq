@@ -1,0 +1,16 @@
+# ==============================================================================
+# 开发与联调环境配置 (Profile: dev)
+# 激活方式: --spring.profiles.active=dev 或 SPRING_PROFILES_ACTIVE=dev
+# ==============================================================================
+
+server:
+  port: ${MCP_SERVER_PORT:${SERVER_PORT:8080}}
+
+rocketmq:
+  # 本地开发测试环境 NameServer 与 Proxy 默认地址
+  namesrv-addr: ${MCP_ROCKETMQ_NAMESRV_ADDR:127.0.0.1:9876}
+  endpoints: ${MCP_ROCKETMQ_ENDPOINTS:127.0.0.1:8081}
+  # 开发环境允许执行写操作
+  read-only: false
+  # 开发测试环境激活破坏性工具能力（仍需入参 confirm: true 防呆确认）
+  enable-destructive-tools: true

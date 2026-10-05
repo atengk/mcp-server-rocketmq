@@ -71,3 +71,12 @@ _Avoid_: 私有镜像站, 手工镜像分发
 **Release Artifact (发行版附件构件)**:
 随 Git Tag 自动化发版流程构建的可执行单一 Fat Jar 及其 SHA-256 完整性校验文件，供用户直接下载部署运行。
 _Avoid_: 源码压缩包, 中间构建包
+
+**Multi-Instance MCP Configuration (多实例/多环境 MCP 配置)**:
+在同一 AI 宿主客户端中并列挂载多个独立运行的 MCP Server 进程或网络端点（如 `rocketmq-dev`、`rocketmq-prod`），实现单会话跨环境统一受控运维与集群对比。
+_Avoid_: 多开客户端, 手动切配置
+
+**Tiered Safety Policy (分级安全策略)**:
+针对开发、测试与生产等不同生命周期集群实施的差异化安全准入矩阵。开发环境赋予写操作与防呆确认工具，生产环境强制施加全局只读守卫与硬锁定。
+_Avoid_: 一刀切安全, 无序权限
+
