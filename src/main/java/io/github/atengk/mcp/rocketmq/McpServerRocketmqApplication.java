@@ -1,9 +1,11 @@
 package io.github.atengk.mcp.rocketmq;
 
 import io.github.atengk.mcp.rocketmq.config.RocketmqProperties;
+import io.github.atengk.mcp.rocketmq.config.aot.RocketmqRuntimeHintsRegistrar;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.annotation.ImportRuntimeHints;
 
 /**
  * Apache RocketMQ Model Context Protocol (MCP) 服务端主启动类。
@@ -14,6 +16,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
  */
 @SpringBootApplication
 @EnableConfigurationProperties(RocketmqProperties.class)
+@ImportRuntimeHints(RocketmqRuntimeHintsRegistrar.class)
 public class McpServerRocketmqApplication {
 
     public static void main(String[] args) {

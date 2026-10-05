@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<configuration scan="true" scanPeriod="60 seconds">
+<configuration scan="false">
+    <springProperty scope="context" name="CONSOLE_TARGET" source="console.log.target" defaultValue="${CONSOLE_LOG_TARGET:-System.out}"/>
     <property name="LOG_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n" />
-    <property name="CONSOLE_TARGET" value="${CONSOLE_LOG_TARGET:-System.out}" />
 
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <target>${CONSOLE_TARGET}</target>

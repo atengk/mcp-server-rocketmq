@@ -1,0 +1,39 @@
+{
+  "name": "@atengk/mcp-server-rocketmq",
+  "version": "1.0.0",
+  "description": "Apache RocketMQ 5 Model Context Protocol (MCP) server native binary wrapper for npx instant execution",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "rocketmq",
+    "apache-rocketmq",
+    "ai-agent",
+    "native-binary"
+  ],
+  "homepage": "https://github.com/atengk/mcp-server-rocketmq",
+  "bugs": {
+    "url": "https://github.com/atengk/mcp-server-rocketmq/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/atengk/mcp-server-rocketmq.git"
+  },
+  "license": "Apache-2.0",
+  "author": "Ateng",
+  "bin": {
+    "mcp-server-rocketmq": "./bin/cli.js"
+  },
+  "files": [
+    "bin/",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "optionalDependencies": {
+    "@atengk/mcp-server-rocketmq-win32-x64": "1.0.0",
+    "@atengk/mcp-server-rocketmq-linux-x64": "1.0.0",
+    "@atengk/mcp-server-rocketmq-darwin-arm64": "1.0.0"
+  }
+}

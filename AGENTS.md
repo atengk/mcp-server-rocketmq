@@ -44,7 +44,11 @@
 8. **客户端生命周期自愈与韧性加固 (ADR 0008)**：
    - Remoting Admin 客户端引入 5000ms 重连冷却防抖与 ACL RPCHook 自动注入；
    - gRPC 消息客户端具备 channel 损坏自愈重建机制；
-   - 消息体严格执行 4MB 前置体积防爆防御；创建 Topic 前置强校验活跃 Master 存活。
+   - 消息体严格执行 4MB 前置体积防爆防御；创建 Topic 前置强校验活跃 Master 存活；
+9. **GraalVM Native 原生二进制与 npm 多包分发 (ADR 0009)**：
+   - 坚持 Spring Boot 4 Native AOT 引擎，拒绝 Quarkus 重写税；
+   - 消息端（gRPC）原生契约支持，运维端（Remoting）采用 Tracing Agent 跑全量测试捕获与 Spring `RuntimeHintsRegistrar` 混合治理；
+   - 采用 npm Scoped 多包架构（`@atengk/mcp-server-rocketmq` + optionalDependencies 跨平台二进制），提供 `npx` 零 JRE 门槛秒开体验。
 
 ---
 

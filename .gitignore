@@ -57,7 +57,8 @@ target/
 *.class
 .gradle/
 build/
-bin/
+/bin/
+!npm/@atengk/mcp-server-rocketmq/bin/
 *.jar
 *.war
 *.nar

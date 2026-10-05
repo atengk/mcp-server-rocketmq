@@ -61,6 +61,7 @@ import org.apache.rocketmq.remoting.protocol.route.TopicRouteData;
 import org.apache.rocketmq.tools.admin.DefaultMQAdminExt;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.context.annotation.Lazy;
@@ -98,11 +99,11 @@ public class DefaultAdminClientService implements AdminClientService, Initializi
     private DefaultMQAdminExt mqAdminExt;
     private volatile boolean started = false;
     private volatile long lastReconnectTimestamp = 0L;
-
     public DefaultAdminClientService(RocketmqProperties properties) {
         this(properties, null);
     }
 
+    @Autowired
     public DefaultAdminClientService(RocketmqProperties properties, @Lazy MessagingClientService messagingClientService) {
         this.properties = properties;
         this.messagingClientService = messagingClientService;

@@ -20,7 +20,11 @@ import java.util.Map;
  * @author Ateng
  * @since 2026-10-04
  */
-public class StdioEnvironmentPostProcessor implements EnvironmentPostProcessor, Ordered {
+@SuppressWarnings("deprecation")
+public class StdioEnvironmentPostProcessor implements
+        org.springframework.boot.EnvironmentPostProcessor,
+        org.springframework.boot.env.EnvironmentPostProcessor,
+        Ordered {
 
     public static final String STDIO_TRANSPORT_PROPERTY_SOURCE = "stdioTransportOverrides";
     public static final String MCP_TRANSPORT_KEY = "mcp.transport";
@@ -41,12 +45,17 @@ public class StdioEnvironmentPostProcessor implements EnvironmentPostProcessor, 
             // 2. 关闭内嵌 Web 容器，降低常驻开销
             application.setWebApplicationType(WebApplicationType.NONE);
 
-            // 3. 注入标准输出纯净化与 stdio 传输覆盖配置
+            // 3. 将控制台日志重定向至 System.err，保证 stdout 100% 纯净 (ADR 0003)
+            System.setProperty("CONSOLE_LOG_TARGET", "System.err");
+
+            // 4. 注入标准输出纯净化与 stdio 传输覆盖配置
             Map<String, Object> overrides = new HashMap<>();
             overrides.put("spring.ai.mcp.server.stdio", "true");
+            overrides.put("spring.ai.mcp.server.protocol", "STREAMABLE");
             overrides.put("spring.main.banner-mode", "off");
             overrides.put("spring.main.web-application-type", "none");
             overrides.put("CONSOLE_LOG_TARGET", "System.err");
+            overrides.put("console.log.target", "System.err");
 
             environment.getPropertySources().addFirst(new MapPropertySource(STDIO_TRANSPORT_PROPERTY_SOURCE, overrides));
         }

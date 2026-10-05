@@ -57,3 +57,11 @@ jobs:
 
       - name: Maven 构建与完整单元测试质量门禁
         run: mvn clean verify -B
+
+      - name: 设置 Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 运行 npm 包装器跨平台调度测试 (接缝 3)
+        run: node --test npm/test/cli.test.js

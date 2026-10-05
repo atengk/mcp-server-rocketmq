@@ -80,3 +80,16 @@ _Avoid_: 多开客户端, 手动切配置
 针对开发、测试与生产等不同生命周期集群实施的差异化安全准入矩阵。开发环境赋予写操作与防呆确认工具，生产环境强制施加全局只读守卫与硬锁定。
 _Avoid_: 一刀切安全, 无序权限
 
+**Native Binary (原生二进制构件)**:
+经 GraalVM Ahead-Of-Time (AOT) 静态编译生成的脱离 JVM 运行时依赖的平台原生独立可执行文件（ELF / PE / Mach-O）。
+_Avoid_: Fat Jar, 安装包, 动态链接库
+
+**Native Binary Wrapper (原生二进制包装器)**:
+用于抹平跨平台文件寻址与执行权限差异、提供 `npx` 零安装即用体验的 Node.js/npm 轻量启动引导分发外壳。
+_Avoid_: Node 重写, 运行容器, 外挂代理
+
+**Runtime Hints (AOT 运行时提示)**:
+向 GraalVM 静态分析引擎显式声明的动态反射、JNI、资源文件及序列化白名单元数据契约，用于攻克 RocketMQ 遗留 Remoting 客户端在 Native 编译下的类加载黑盒。
+_Avoid_: 反射补丁, 动态配置, 降级开关
+
+
