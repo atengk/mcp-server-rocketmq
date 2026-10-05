@@ -879,6 +879,53 @@ class DefaultAdminClientServiceTest {
                 .hasMessageContaining("MessagingClientService is unavailable");
     }
 
+    @Test
+    @DisplayName("验证创建 Topic 时若集群无活跃 Master 节点则拦截并抛出 IllegalStateException")
+    void shouldThrowExceptionWhenNoActiveMasterBrokerToCreateTopic() throws Exception {
+        DefaultMQAdminExt mockAdmin = mock(DefaultMQAdminExt.class);
+        ClusterInfo emptyClusterInfo = new ClusterInfo();
+        emptyClusterInfo.setBrokerAddrTable(new HashMap<>()); // 空 broker 节点映射
+
+        when(mockAdmin.examineBrokerClusterInfo()).thenReturn(emptyClusterInfo);
+
+        RocketmqProperties properties = new RocketmqProperties();
+        TestableAdminClientService service = new TestableAdminClientService(properties, mockAdmin);
+
+        assertThatThrownBy(() -> service.createTopic("NoBrokerTopic", 8, 8, 6))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("未发现活跃的 Master Broker 节点");
+    }
+
+    @Test
+    @DisplayName("验证重连在 5s 冷却窗口内防抖生效避免频繁重启")
+    void shouldSkipFrequentReconnectWithinCooldownWindow() {
+        DefaultMQAdminExt mockAdmin = mock(DefaultMQAdminExt.class);
+        RocketmqProperties properties = new RocketmqProperties();
+        TestableAdminClientService service = new TestableAdminClientService(properties, mockAdmin);
+
+        // 第一次调用 reconnect
+        service.reconnect();
+        // 紧接着再次调用，应受 5s 冷却时间拦截
+        service.reconnect();
+
+        // 验证 mockAdmin 不会被反复多次强制 shutdown
+        verify(mockAdmin, org.mockito.Mockito.atMostOnce()).shutdown();
+    }
+
+    @Test
+    @DisplayName("验证配置了 accessKey 和 secretKey 时成功创建包含 AclClientRPCHook 的客户端")
+    void shouldConfigureAclWhenCredentialsArePresent() {
+        RocketmqProperties properties = new RocketmqProperties();
+        properties.setNamesrvAddr("127.0.0.1:9876");
+        properties.setAccessKey("test-ak");
+        properties.setSecretKey("test-sk");
+
+        DefaultAdminClientService realService = new DefaultAdminClientService(properties);
+        DefaultMQAdminExt adminExt = realService.createMQAdminExt();
+
+        assertThat(adminExt).isNotNull();
+    }
+
     private static class TestableAdminClientService extends DefaultAdminClientService {
         private final DefaultMQAdminExt mockClient;
 

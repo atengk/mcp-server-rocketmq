@@ -29,6 +29,8 @@ public class DefaultMessagingClientService implements MessagingClientService, Di
 
     private static final Logger log = LoggerFactory.getLogger(DefaultMessagingClientService.class);
 
+    public static final int MAX_MESSAGE_BODY_BYTES = 4 * 1024 * 1024; // 4MB
+
     private final RocketmqProperties properties;
     private final Object lock = new Object();
     private volatile Producer producer;
@@ -52,8 +54,12 @@ public class DefaultMessagingClientService implements MessagingClientService, Di
         String cleanKeys = (keys != null && !keys.isBlank()) ? keys.trim() : null;
         String cleanGroup = (messageGroup != null && !messageGroup.isBlank()) ? messageGroup.trim() : null;
 
-        ClientServiceProvider provider = getClientServiceProvider();
         byte[] bodyBytes = body.getBytes(StandardCharsets.UTF_8);
+        if (bodyBytes.length > MAX_MESSAGE_BODY_BYTES) {
+            throw new IllegalArgumentException("消息体体积 (" + bodyBytes.length + " bytes) 超过最大允许上限 4MB (" + MAX_MESSAGE_BODY_BYTES + " bytes)");
+        }
+
+        ClientServiceProvider provider = getClientServiceProvider();
 
         MessageBuilder messageBuilder = provider.newMessageBuilder()
                 .setTopic(cleanTopic)
@@ -78,7 +84,15 @@ public class DefaultMessagingClientService implements MessagingClientService, Di
         log.info("Sending message via gRPC to topic: {}, tag: {}, keys: {}, group: {}, deliveryTimestamp: {}",
                 cleanTopic, cleanTag, cleanKeys, cleanGroup, deliveryTimestamp);
 
-        SendReceipt receipt = activeProducer.send(message);
+        SendReceipt receipt;
+        try {
+            receipt = activeProducer.send(message);
+        } catch (Exception e) {
+            log.warn("Failed to send message via gRPC to topic {}. Invalidating producer for self-healing: {}", cleanTopic, e.getMessage());
+            reconnect();
+            throw e;
+        }
+
         String messageId = receipt != null && receipt.getMessageId() != null
                 ? receipt.getMessageId().toString()
                 : "UNKNOWN";
@@ -95,6 +109,24 @@ public class DefaultMessagingClientService implements MessagingClientService, Di
                 deliveryTimestamp,
                 bodyBytes.length
         );
+    }
+
+    /**
+     * 重置与关闭当前 gRPC Producer 引用，触发延迟自愈重建。
+     */
+    public void reconnect() {
+        synchronized (lock) {
+            if (producer != null) {
+                try {
+                    producer.close();
+                    log.info("RocketMQ 5.x gRPC Producer closed for reconnect.");
+                } catch (Exception e) {
+                    log.warn("Error while closing RocketMQ 5.x gRPC Producer on reconnect: {}", e.getMessage());
+                } finally {
+                    producer = null;
+                }
+            }
+        }
     }
 
     /**

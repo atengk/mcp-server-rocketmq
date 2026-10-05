@@ -174,6 +174,17 @@ class MessageProduceToolsTest {
     }
 
     @Test
+    @DisplayName("验证发送消息体体积超过 4MB 时被拦截")
+    void shouldRejectMessageExceedingMaxBodyLimit() {
+        doNothing().when(readOnlyGuard).checkWritable("rocketmq_send_message");
+        String giantBody = "X".repeat(4 * 1024 * 1024 + 1);
+
+        assertThatThrownBy(() -> produceTools.sendMessage("OrderTopic", giantBody, null, null, null, null, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("exceeds maximum limit of 4MB");
+    }
+
+    @Test
     @DisplayName("验证延时秒数为 0 或负数时拦截并抛出 IllegalArgumentException")
     void shouldThrowExceptionWhenDelaySecondsIsNonPositive() {
         doNothing().when(readOnlyGuard).checkWritable("rocketmq_send_message");

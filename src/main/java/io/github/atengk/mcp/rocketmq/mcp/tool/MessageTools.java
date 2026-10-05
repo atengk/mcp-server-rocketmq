@@ -90,6 +90,12 @@ public class MessageTools {
         if (key == null || key.isBlank()) {
             throw new IllegalArgumentException("Parameter 'key' must not be blank");
         }
+        if (beginTimestamp != null && endTimestamp != null && beginTimestamp > endTimestamp) {
+            throw new IllegalArgumentException("Parameter 'beginTimestamp' (" + beginTimestamp + ") must not be greater than 'endTimestamp' (" + endTimestamp + ")");
+        }
+        if (maxNum != null && (maxNum < 1 || maxNum > 64)) {
+            throw new IllegalArgumentException("Parameter 'maxNum' must be between 1 and 64, actual: " + maxNum);
+        }
         log.info("Executing MCP Tool: rocketmq_query_message_by_key with topic: {}, key: {}", topic.trim(), key.trim());
         return adminClientService.queryMessageByKey(topic.trim(), key.trim(), beginTimestamp, endTimestamp, maxNum);
     }

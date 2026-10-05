@@ -122,6 +122,46 @@ class DefaultMessagingClientServiceTest {
         verify(mockProducer).close();
     }
 
+    @Test
+    @DisplayName("验证超过 4MB 限制的消息体被拦截并抛出 IllegalArgumentException")
+    void shouldRejectMessageExceedingMaxBodySize() {
+        RocketmqProperties properties = new RocketmqProperties();
+        Producer mockProducer = mock(Producer.class);
+        ClientServiceProvider mockProvider = mock(ClientServiceProvider.class);
+        TestableMessagingClientService service = new TestableMessagingClientService(properties, mockProducer, mockProvider);
+
+        // 构造大于 4MB 的字符串 (4 * 1024 * 1024 + 1 bytes)
+        String giantBody = "A".repeat(4 * 1024 * 1024 + 1);
+
+        assertThatThrownBy(() -> service.sendMessage("TestTopic", giantBody, null, null, null, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("超过最大允许上限 4MB");
+    }
+
+    @Test
+    @DisplayName("验证发送失败时触发自愈重连并关闭旧 Producer")
+    void shouldInvalidateProducerOnSendFailure() throws Exception {
+        RocketmqProperties properties = new RocketmqProperties();
+        Producer mockProducer = mock(Producer.class);
+        ClientServiceProvider mockProvider = mock(ClientServiceProvider.class);
+        MessageBuilder mockMessageBuilder = mock(MessageBuilder.class);
+
+        when(mockMessageBuilder.setTopic(any())).thenReturn(mockMessageBuilder);
+        when(mockMessageBuilder.setBody(any())).thenReturn(mockMessageBuilder);
+        when(mockMessageBuilder.build()).thenReturn(mock(Message.class));
+        when(mockProvider.newMessageBuilder()).thenReturn(mockMessageBuilder);
+        when(mockProducer.send(any())).thenThrow(new RuntimeException("gRPC channel broken"));
+
+        TestableMessagingClientService service = new TestableMessagingClientService(properties, mockProducer, mockProvider);
+
+        assertThatThrownBy(() -> service.sendMessage("TestTopic", "payload", null, null, null, null))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("gRPC channel broken");
+
+        // 验证旧 producer 已被调用 close 进行自愈清理
+        verify(mockProducer).close();
+    }
+
     private static class TestableMessagingClientService extends DefaultMessagingClientService {
         private final Producer mockProducer;
         private final ClientServiceProvider mockProvider;

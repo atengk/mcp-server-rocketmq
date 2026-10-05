@@ -138,6 +138,22 @@ class MessageToolsTest {
     }
 
     @Test
+    @DisplayName("验证 rocketmq_query_message_by_key 时间倒挂与 maxNum 范围非法防御")
+    void shouldFailQueryMessageByKeyWhenTimeInvertedOrMaxNumOutOfRange() {
+        assertThatThrownBy(() -> messageTools.queryMessageByKey("OrderTopic", "KEY_001", 2000L, 1000L, 32))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("must not be greater than 'endTimestamp'");
+
+        assertThatThrownBy(() -> messageTools.queryMessageByKey("OrderTopic", "KEY_001", 1000L, 2000L, 0))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Parameter 'maxNum' must be between 1 and 64");
+
+        assertThatThrownBy(() -> messageTools.queryMessageByKey("OrderTopic", "KEY_001", 1000L, 2000L, 100))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Parameter 'maxNum' must be between 1 and 64");
+    }
+
+    @Test
     @DisplayName("验证 rocketmq_query_dlq_messages 正常调用")
     void shouldQueryDlqMessagesSuccessfully() throws Exception {
         MessageDetailDTO dlqMsg = new MessageDetailDTO(

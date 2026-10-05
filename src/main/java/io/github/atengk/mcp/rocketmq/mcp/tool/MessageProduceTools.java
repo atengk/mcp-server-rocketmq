@@ -72,6 +72,10 @@ public class MessageProduceTools {
         if (body == null || body.isBlank()) {
             throw new IllegalArgumentException("Parameter 'body' must not be blank");
         }
+        byte[] bodyBytes = body.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        if (bodyBytes.length > 4 * 1024 * 1024) {
+            throw new IllegalArgumentException("Parameter 'body' size (" + bodyBytes.length + " bytes) exceeds maximum limit of 4MB (4194304 bytes)");
+        }
 
         // 3. 延时与定时投递参数合法性校验
         if (delaySeconds != null && delaySeconds <= 0) {

@@ -67,6 +67,8 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import org.apache.rocketmq.acl.common.AclClientRPCHook;
+import org.apache.rocketmq.acl.common.SessionCredentials;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -89,11 +91,13 @@ public class DefaultAdminClientService implements AdminClientService, Initializi
     private static final long MASTER_BROKER_ID = 0L;
     private static final int DEFAULT_QUEUE_NUMS = 8;
     private static final int DEFAULT_TOPIC_PERM = 6;
+    private static final long RECONNECT_COOLDOWN_MS = 5000L;
 
     private final RocketmqProperties properties;
     private final MessagingClientService messagingClientService;
     private DefaultMQAdminExt mqAdminExt;
     private volatile boolean started = false;
+    private volatile long lastReconnectTimestamp = 0L;
 
     public DefaultAdminClientService(RocketmqProperties properties) {
         this(properties, null);
@@ -131,10 +135,22 @@ public class DefaultAdminClientService implements AdminClientService, Initializi
      * @return 新建的 DefaultMQAdminExt 客户端
      */
     protected DefaultMQAdminExt createMQAdminExt() {
+        if (properties != null && properties.getAccessKey() != null && properties.getSecretKey() != null
+                && !properties.getAccessKey().isBlank() && !properties.getSecretKey().isBlank()) {
+            log.info("Configuring DefaultMQAdminExt with ACL RPCHook using accessKey: {}", properties.getAccessKey().trim());
+            return new DefaultMQAdminExt(new AclClientRPCHook(
+                    new SessionCredentials(properties.getAccessKey().trim(), properties.getSecretKey().trim())));
+        }
         return new DefaultMQAdminExt();
     }
 
     public synchronized void reconnect() {
+        long now = System.currentTimeMillis();
+        if (now - lastReconnectTimestamp < RECONNECT_COOLDOWN_MS) {
+            log.info("Skipping frequent reconnect request due to {}ms cooldown window.", RECONNECT_COOLDOWN_MS);
+            return;
+        }
+        lastReconnectTimestamp = now;
         if (mqAdminExt != null) {
             try {
                 mqAdminExt.shutdown();
@@ -147,9 +163,13 @@ public class DefaultAdminClientService implements AdminClientService, Initializi
         initAdminClient();
     }
 
-    protected synchronized DefaultMQAdminExt ensureStarted() throws Exception {
+    protected DefaultMQAdminExt ensureStarted() throws Exception {
         if (!started || mqAdminExt == null) {
-            initAdminClient();
+            synchronized (this) {
+                if (!started || mqAdminExt == null) {
+                    initAdminClient();
+                }
+            }
         }
         if (!started || mqAdminExt == null) {
             throw new IllegalStateException("DefaultMQAdminExt is not available. Check NameServer connectivity: " + properties.getNamesrvAddr());
@@ -744,7 +764,15 @@ public class DefaultAdminClientService implements AdminClientService, Initializi
     private MessageExt doQueryMessageById(String targetId, String targetTopic) throws Exception {
         DefaultMQAdminExt client = ensureStarted();
         if (targetTopic != null) {
-            return client.viewMessage(targetTopic, targetId);
+            try {
+                return client.viewMessage(targetTopic, targetId);
+            } catch (RemotingConnectException | RemotingTimeoutException | RemotingSendRequestException e) {
+                throw e; // 网络通信故障向上透传触发重试/自愈
+            } catch (Exception e) {
+                // 消息未找到等业务异常记录 DEBUG 并返回 null，杜绝误触发重连
+                log.debug("Message {} not found in topic {}: {}", targetId, targetTopic, e.getMessage());
+                return null;
+            }
         }
 
         TopicListDTO topicListDTO = listTopics(false);
@@ -770,6 +798,12 @@ public class DefaultAdminClientService implements AdminClientService, Initializi
         }
         if (key == null || key.isBlank()) {
             throw new IllegalArgumentException("key 不能为空");
+        }
+        if (beginTimestamp != null && endTimestamp != null && beginTimestamp > endTimestamp) {
+            throw new IllegalArgumentException("beginTimestamp (" + beginTimestamp + ") 不能大于 endTimestamp (" + endTimestamp + ")");
+        }
+        if (maxNum != null && (maxNum < 1 || maxNum > 64)) {
+            throw new IllegalArgumentException("maxNum 必须在 1 到 64 之间，当前为: " + maxNum);
         }
 
         String targetTopic = topic.trim();
@@ -947,6 +981,9 @@ public class DefaultAdminClientService implements AdminClientService, Initializi
         topicConfig.setPerm(permission);
 
         Set<String> masterBrokers = getMasterBrokerAddresses(clusterInfo);
+        if (masterBrokers.isEmpty()) {
+            throw new IllegalStateException("集群中未发现活跃的 Master Broker 节点，无法创建主题: " + topic.trim());
+        }
         int updatedBrokers = 0;
         for (String masterAddr : masterBrokers) {
             client.createAndUpdateTopicConfig(masterAddr, topicConfig);
@@ -1091,7 +1128,7 @@ public class DefaultAdminClientService implements AdminClientService, Initializi
     }
 
     @Override
-    public void destroy() {
+    public synchronized void destroy() {
         if (started && mqAdminExt != null) {
             try {
                 mqAdminExt.shutdown();
