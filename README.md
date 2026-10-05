@@ -588,7 +588,7 @@ java -jar mcp-server-rocketmq-1.0.0.jar \
 ├── .github/
 │   ├── workflows/
 │   │   ├── ci.yml                  # 自动化质量门禁流水线 (JDK 21 + mvn verify)
-│   │   └── release.yml             # 三位一体自动化发版流水线 (Fat Jar / Packages / GHCR)
+│   │   └── release.yml             # 双轨精准自动化发版流水线 (Fat Jar / GHCR)
 │   ├── ISSUE_TEMPLATE/             # 结构化 Issue 反馈模版
 │   └── PULL_REQUEST_TEMPLATE.md    # PR 提交审核模版
 ├── docs/

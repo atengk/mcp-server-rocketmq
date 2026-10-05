@@ -36,9 +36,9 @@
    - 所有返回消息体的操作，必须施加 4KB 防爆截断与 UTF-8/Base64 安全解码；
 5. **管理客户端单例受管 (ADR 0005)**：
    - `DefaultMQAdminExt` 统一由 Spring 容器作为单例 Bean 生命周期受管，严禁在 Tool 方法内部频繁创建与销毁；
-6. **三位一体容器化与发版流水线 (ADR 0006)**：
+6. **双轨精准容器化与发版流水线 (ADR 0006)**：
    - Docker 镜像采用 Temurin JRE 21 Alpine 多阶段构建，强制以非 root 用户 (`mcp:mcp`, UID 10001) 运行；
-   - 随 Tag 自动化发版，三轨分发：GitHub Release 挂载 Fat Jar 附件、GitHub Packages 发布 Maven 构件、GHCR 发布多架构容器镜像；
+   - 随 Tag 自动化发版，聚焦双轨精准分发：GitHub Release 挂载 Fat Jar 附件及 SHA-256、GHCR 发布多架构容器镜像；摒弃非必要的 Maven Packages 发布；
 7. **包命名空间与 Maven 坐标规范 (ADR 0007)**：
    - 全局包名统一规范为 `io.github.atengk.mcp.rocketmq`；Maven GAV 坐标规范为 `io.github.atengk:mcp-server-rocketmq`；
 8. **客户端生命周期自愈与韧性加固 (ADR 0008)**：
