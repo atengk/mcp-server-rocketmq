@@ -137,6 +137,7 @@
                                 <buildArg>-H:+UnlockExperimentalVMOptions</buildArg>
                                 <buildArg>--enable-http</buildArg>
                                 <buildArg>--enable-https</buildArg>
+                                <buildArg>--initialize-at-run-time=io.grpc.netty.shaded.io.netty,io.grpc.netty.shaded.io.grpc.netty</buildArg>
                             </buildArgs>
                         </configuration>
                     </plugin>
