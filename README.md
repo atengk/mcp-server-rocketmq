@@ -109,26 +109,29 @@ flowchart TD
 
 ### 1. 🧰 MCP Tools 核心工具集 (共 18 项工具)
 
-| 核心领域 | 工具标识 (Tool Name) | 职责说明 | 安全防护级别 |
-| :--- | :--- | :--- | :--- |
-| **集群拓扑域** | `rocketmq_cluster_info` | 查询 NameServer / Broker 节点分布、角色与在线状态 | 只读查询 |
-| | `rocketmq_broker_stats` | 查询指定 Broker 运行时核心指标（吞吐量、写入 TPS、物理磁盘水位） | 只读查询 |
-| **主题生命周期** | `rocketmq_list_topics` | 列出集群业务 Topic（自动隐藏系统内部管理主题） | 只读查询 |
-| | `rocketmq_topic_route` | 查询指定 Topic 的读写队列分布与 Broker 路由详情 | 只读查询 |
-| | `rocketmq_topic_status` | 查询指定 Topic 各分片队列的最小/最大 Offset 与堆积容量统计 | 只读查询 |
-| | `rocketmq_create_topic` | 声明式创建或更新指定 Topic（动态配置队列数与权限） | 受 `read-only` 约束 |
-| | `rocketmq_delete_topic` | 彻底清理下线指定业务 Topic | 🚨 **双层防呆保护** |
-| **消费组与积压** | `rocketmq_list_consumer_groups` | 获取所有已注册的消费组清单 | 只读查询 |
-| | `rocketmq_consumer_status` | 查询消费组的在线客户端 ID、IP 端口及订阅详情 | 只读查询 |
-| | `rocketmq_consumer_lag` | 精确计算消费组在各分片队列的未消费堆积量 (Lag) | 只读查询 |
-| | `rocketmq_top_consumer_lag` | **全集群积压排行榜**：极速检出堆积最严重的 TopN 消费组 | 只读查询 |
-| | `rocketmq_reset_consumer_offset`| 按时间戳回溯或按最大位点跳过重置消费点位 | 🚨 **双层防呆保护** |
-| **消息检索排查** | `rocketmq_query_message_by_id` | 根据 32 位 Message ID 精确检索消息内容与用户属性 | 只读 (4KB截断) |
-| | `rocketmq_query_message_by_key`| 根据业务 Key 在指定时间窗口内扫描匹配的消息列表 | 只读 (4KB截断) |
-| | `rocketmq_query_dlq_messages` | 检索指定消费组死信队列（DLQ）中的失败堆积消息 | 只读 (4KB截断) |
-| | `rocketmq_query_message_trace` | 调阅单条消息自 Producer、Broker 至 Consumer 的全链路轨迹耗时 | 只读 (4KB截断) |
-| **消息生产自愈** | `rocketmq_send_message` | 发送测试消息（支持普通、分区顺序与定时延时消息） | 受 `read-only` 约束 |
-| | `rocketmq_resend_dlq_message` | 将死信队列中的指定消息重新投递回业务 Topic 触发重试 | 🚨 **双层防呆保护** |
+| 核心领域 | 工具标识 (Tool Name) | 核心入参 (Parameters) | 职责说明 | 安全防护级别 |
+| :--- | :--- | :--- | :--- | :--- |
+| **集群拓扑域** | `rocketmq_cluster_info` | *（无入参）* | 查询 NameServer / Broker 节点分布、角色与在线状态 | 只读查询 |
+| | `rocketmq_broker_stats` | **`brokerAddr`** | 查询指定 Broker 运行时核心指标（吞吐量、写入 TPS、物理磁盘水位） | 只读查询 |
+| **主题生命周期** | `rocketmq_list_topics` | `includeSystem?` | 列出集群业务 Topic（自动隐藏系统内部管理主题） | 只读查询 |
+| | `rocketmq_topic_route` | **`topic`** | 查询指定 Topic 的读写队列分布与 Broker 路由详情 | 只读查询 |
+| | `rocketmq_topic_status` | **`topic`** | 查询指定 Topic 各分片队列的最小/最大 Offset 与堆积容量统计 | 只读查询 |
+| | `rocketmq_create_topic` | **`topic`**, `readQueueNums?`, `writeQueueNums?`, `perm?` | 声明式创建或更新指定 Topic（动态配置队列数与读写权限） | 受 `read-only` 约束 |
+| | `rocketmq_delete_topic` | **`topic`**, **`confirm: true`** | 彻底清理下线指定业务 Topic | 🚨 **双层防呆保护** |
+| **消费组与积压** | `rocketmq_list_consumer_groups` | `includeSystem?` | 获取所有已注册的消费组清单 | 只读查询 |
+| | `rocketmq_consumer_status` | **`consumerGroup`** | 查询消费组的在线客户端 ID、IP 端口及订阅详情 | 只读查询 |
+| | `rocketmq_consumer_lag` | **`consumerGroup`**, `topic?` | 精确计算消费组在各分片队列的未消费堆积量 (Lag) | 只读查询 |
+| | `rocketmq_top_consumer_lag` | `topN?` *(默认 10)* | **全集群积压排行榜**：极速检出堆积最严重的 TopN 消费组 | 只读查询 |
+| | `rocketmq_reset_consumer_offset`| **`consumerGroup`**, **`topic`**, **`resetType`**, `timestamp?`, **`confirm: true`** | 按时间戳回溯或按最大位点跳过重置消费点位 | 🚨 **双层防呆保护** |
+| **消息检索排查** | `rocketmq_query_message_by_id` | **`topic`**, **`msgId`** | 根据 32 位 Message ID 精确检索消息内容与用户属性 | 只读 (4KB截断) |
+| | `rocketmq_query_message_by_key`| **`topic`**, **`key`**, `beginTimestamp?`, `endTimestamp?`, `maxNum?` | 根据业务 Key 在指定时间窗口内扫描匹配的消息列表 | 只读 (4KB截断) |
+| | `rocketmq_query_dlq_messages` | **`consumerGroup`**, `maxNum?` | 检索指定消费组死信队列（DLQ）中的失败堆积消息 | 只读 (4KB截断) |
+| | `rocketmq_query_message_trace` | **`msgId`**, `topic?` | 调阅单条消息自 Producer、Broker 至 Consumer 的全链路轨迹耗时 | 只读 (4KB截断) |
+| **消息生产自愈** | `rocketmq_send_message` | **`topic`**, **`body`**, `tag?`, `keys?`, `messageGroup?`, `deliveryTimestamp?` | 发送测试消息（支持普通、分区顺序与定时延时消息） | 受 `read-only` 约束 |
+| | `rocketmq_resend_dlq_message` | **`consumerGroup`**, **`msgId`**, **`targetTopic`**, **`confirm: true`** | 将死信队列中的指定消息重新投递回业务 Topic 触发重试 | 🚨 **双层防呆保护** |
+
+> 📌 **注**：参数加粗表示必填项，带 `?` 表示可选参数；破坏性工具必须由模型显式传入 `confirm: true` 且启动配置放行，否则将被双层防呆拦截。
+
 
 ### 2. 📚 MCP Resources (只读上下文资源)
 
@@ -218,19 +221,98 @@ flowchart TD
 > 🤖 **AI 思考与动作**：
 > 自动触发 MCP 预置专家工作流 `cluster_health_check`，串联 Broker 磁盘/TPS 检查与核心业务主题读写队列均衡分布分析。
 
+### 场景 5：跨环境多集群比对与故障复现 (Multi-Cluster Collaboration)
+
+> 👤 **用户**：“帮我比对一下 `rocketmq-dev` 和 `rocketmq-prod` 上的 `trade_order_topic` 队列配置是否一致？另外查一下生产死信，把死信内容作为测试消息发到 dev 集群让我本地调试。”
+> 
+> 🤖 **AI 思考与动作**：
+> 1. 分别调用 `rocketmq-dev:rocketmq_topic_route` 与 `rocketmq-prod:rocketmq_topic_route`；
+> 2. 发现生产环境读写队列数均为 16，而开发环境仅为 8；
+> 3. 调用生产只读实例 `rocketmq-prod:rocketmq_query_dlq_messages(group: "trade_group")` 提取失败死信 Payload；
+> 4. 将提取到的 Payload 调用开发实例发送工具 `rocketmq-dev:rocketmq_send_message(topic: "trade_order_topic", body: payload)`，安全复现；
+> 
+> 📋 **AI 诊断反馈**：
+> > “配置比对结论：
+> > - **生产环境 (`rocketmq-prod`)**: 读写队列各 16 个，分布于 2 个 Master Broker；
+> > - **开发环境 (`rocketmq-dev`)**: 读写队列各 8 个，分布于 1 个 Broker；
+> > 
+> > 同时，我已从生产环境以**安全只读方式**提取了最新死信报文（ID: `0A000...`），并成功投递至开发环境 `rocketmq-dev`（新 MsgId: `01000...`），您可直接在本地开发环境断点调试消费逻辑！”
+
 ---
 
 ## 🚀 快速开始与客户端配置 (Usage & Configuration)
 
-`mcp-server-rocketmq` 采用单一自适应可执行 Jar 设计，同时原生支持 **Stdio 模式（本地宿主伴生运行）** 与 **SSE 模式（远程微服务运行）**。
+`mcp-server-rocketmq` 采用单一自适应可执行 Fat Jar 设计，原生支持 **Stdio 模式（本地 AI 宿主伴生运行）** 与 **SSE 模式（远程云原生微服务运行）**。
 
-### 方式一：本地 Stdio 模式 (适配 Claude Desktop、Cursor 等)
+### 1. 📥 快速获取与安装 (Download & Pull)
 
-在 Stdio 模式下，宿主客户端会启动服务端进程作为子进程，并通过标准输入输出交换 JSON-RPC 报文。
+你可以直接下载预编译二进制包或拉取官方轻量容器镜像：
 
-#### 1.1 使用 Java Jar 运行 (推荐本地开发)
+- **方式一：下载预编译可执行 Jar（推荐）**  
+  访问 [GitHub Releases](https://github.com/atengk/mcp-server-rocketmq/releases) 下载最新发行版 Fat Jar（例如 `mcp-server-rocketmq-1.0.0.jar`，附带 SHA-256 校验和），直接基于本地 JRE 21+ 运行。
+- **方式二：拉取预构建 Docker 镜像**  
+  ```bash
+  docker pull ghcr.io/atengk/mcp-server-rocketmq:latest
+  ```
+- **方式三：从源码本地编译构建**  
+  ```bash
+  git clone https://github.com/atengk/mcp-server-rocketmq.git
+  cd mcp-server-rocketmq
+  mvn clean package -DskipTests
+  ```
 
-确保本机已安装 JDK 21，在各 MCP 宿主通用配置中增加：
+---
+
+### 2. ⚙️ 三维基础配置姿势 (Usage Modalities)
+
+`mcp-server-rocketmq` 具备工业级的配置灵活性，支持以下三种正交使用形态，优先级由高到低依次为：**CLI 参数 > 环境变量 > 配置文件**。
+
+#### 姿势一：系统环境变量方式 (Environment Variables)
+适合容器化部署、Kubernetes ConfigMap/Secret 及各 AI 客户端的 `env` 上下文注入：
+
+```bash
+export MCP_ROCKETMQ_NAMESRV_ADDR="10.0.0.1:9876;10.0.0.2:9876"
+export MCP_ROCKETMQ_ENDPOINTS="10.0.0.1:8081"
+export MCP_ROCKETMQ_ACCESS_KEY="rocketmq_user"
+export MCP_ROCKETMQ_SECRET_KEY="rocketmq_pass"
+export MCP_ROCKETMQ_READ_ONLY="false"
+export MCP_ROCKETMQ_ENABLE_DESTRUCTIVE_TOOLS="false"
+export MCP_SERVER_PORT="8080"
+
+java -jar mcp-server-rocketmq-1.0.0.jar
+```
+
+#### 姿势二：命令行启动参数方式 (CLI Arguments)
+适合通过 Spring 命名风格动态覆盖个别调试参数：
+
+```bash
+java -jar mcp-server-rocketmq-1.0.0.jar \
+  --rocketmq.namesrv-addr=192.168.1.100:9876 \
+  --rocketmq.endpoints=192.168.1.100:8081 \
+  --rocketmq.read-only=true \
+  --server.port=9090
+```
+
+#### 姿势三：Spring 多环境配置方式 (Multi-Environment Profiles)
+针对开发、测试与生产等不同网络隔离环境，可一键切换内置的 Profile 模板：
+
+```bash
+# 激活开发测试环境 (Profile: dev，默认开启破坏性工具与本地连接)
+java -jar mcp-server-rocketmq-1.0.0.jar --spring.profiles.active=dev
+
+# 激活生产安全环境 (Profile: prod，强制只读模式，硬锁定破坏性工具)
+java -jar mcp-server-rocketmq-1.0.0.jar --spring.profiles.active=prod
+```
+
+---
+
+### 3. 💻 本地伴生客户端接入 (Stdio 模式)
+
+在 Stdio 模式下，AI 宿主客户端（如 Claude Desktop、Antigravity、Cursor、Cline、Windsurf 等）会启动服务端进程作为本地子进程，并通过标准输入输出流交换 JSON-RPC 报文。
+
+#### 3.1 使用 Java Jar 运行 (本地宿主环境)
+
+确保本机已安装 JDK 21，在 AI Agent 通用配置文件中增加：
 
 ```json
 {
@@ -239,14 +321,14 @@ flowchart TD
       "command": "java",
       "args": [
         "-jar",
-        "/path/to/mcp-server-rocketmq-1.0.0-SNAPSHOT.jar",
+        "/path/to/mcp-server-rocketmq-1.0.0.jar",
         "--mcp.transport=stdio"
       ],
       "env": {
-        "ROCKETMQ_NAMESRV_ADDR": "127.0.0.1:9876",
-        "ROCKETMQ_ENDPOINTS": "127.0.0.1:8081",
-        "ROCKETMQ_READ_ONLY": "false",
-        "ROCKETMQ_ENABLE_DESTRUCTIVE_TOOLS": "false"
+        "MCP_ROCKETMQ_NAMESRV_ADDR": "127.0.0.1:9876",
+        "MCP_ROCKETMQ_ENDPOINTS": "127.0.0.1:8081",
+        "MCP_ROCKETMQ_READ_ONLY": "false",
+        "MCP_ROCKETMQ_ENABLE_DESTRUCTIVE_TOOLS": "false"
       }
     }
   }
@@ -254,11 +336,9 @@ flowchart TD
 ```
 
 > 💡 **标准输出纯净化保障**：
-> 启动参数 `--mcp.transport=stdio` 会自动触发环境后置处理器，关闭 Web 容器、关闭 Banner，并将所有日志重定向至 `System.err`，保证 `System.out` 100% 纯净流通 JSON-RPC，杜绝解析崩溃（详见 [ADR 0003](./docs/adr/0003-single-jar-dual-mode-transport.md)）。
+> 启动参数包含 `--mcp.transport=stdio` 时，内置环境后置处理器会自动剔除 Web 容器、关闭 Banner 并将全部日志重定向至 `System.err`，保证 `System.out` 100% 纯净流通 JSON-RPC，杜绝报文解析崩溃（详见 [ADR 0003](./docs/adr/0003-single-jar-dual-mode-transport.md)）。
 
-#### 1.2 使用 Docker 容器作为 Stdio 运行 (无需本地 Java 环境)
-
-若本地没有 Java 21 环境，可直接通过 `docker run -i` 容器化挂载运行：
+#### 3.2 使用 Docker 容器作为 Stdio 运行 (免本地 Java 环境)
 
 ```json
 {
@@ -269,10 +349,10 @@ flowchart TD
         "run",
         "-i",
         "--rm",
-        "-e", "ROCKETMQ_NAMESRV_ADDR=host.docker.internal:9876",
-        "-e", "ROCKETMQ_ENDPOINTS=host.docker.internal:8081",
-        "-e", "ROCKETMQ_READ_ONLY=false",
-        "-e", "ROCKETMQ_ENABLE_DESTRUCTIVE_TOOLS=false",
+        "-e", "MCP_ROCKETMQ_NAMESRV_ADDR=host.docker.internal:9876",
+        "-e", "MCP_ROCKETMQ_ENDPOINTS=host.docker.internal:8081",
+        "-e", "MCP_ROCKETMQ_READ_ONLY=false",
+        "-e", "MCP_ROCKETMQ_ENABLE_DESTRUCTIVE_TOOLS=false",
         "ghcr.io/atengk/mcp-server-rocketmq:latest",
         "--mcp.transport=stdio"
       ]
@@ -281,37 +361,65 @@ flowchart TD
 }
 ```
 
+#### 3.3 主流 AI 客户端配置文件路径速查
+
+各主流 AI 宿主客户端的标准配置路径如下，将上述配置贴入文件对应的 `mcpServers` 节点即可生效：
+
+| 客户端 | 操作系统 | 默认配置文件路径 |
+| :--- | :--- | :--- |
+| **Claude Desktop** | macOS | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+| | Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
+| **Cursor** | 通用平台 | 项目根目录 `.cursor/mcp.json` 或全局设置 Settings $\rightarrow$ Features $\rightarrow$ MCP |
+| **Cline (VS Code)** | 通用平台 | VS Code 全局扩展目录下的 `cline_mcp_settings.json` |
+| **Windsurf** | 通用平台 | `~/.codeium/windsurf/mcp_config.json` |
+| **通用 Agent / Antigravity** | 通用平台 | 宿主全局配置目录下的 `mcp.json` 或对应环境定义 |
+
 ---
 
-### 方式二：远程 SSE / Streamable HTTP 模式 (云端微服务部署)
+### 4. 🌐 远程微服务与容器化部署 (SSE 模式)
 
-将服务端部署在远程服务器或 Docker 容器内，作为网络服务常驻运行，多个 AI 宿主或协同智能体可通过 URL 直接接入。
+将服务端部署在远程服务器或容器平台中常驻运行，支持多智能体或团队共享同一个 RocketMQ 控制面。
 
-#### 2.1 启动服务
+#### 4.1 方式 A：Docker Compose 一键启动 (推荐)
 
-**以可执行 Jar 启动**：
+仓库根目录已内置生产就绪的 [`docker-compose.yml`](./docker-compose.yml) 与 [`.env.example`](./.env.example)：
+
 ```bash
-java -jar mcp-server-rocketmq-1.0.0-SNAPSHOT.jar \
+# 1. 复制环境变量模版并按需配置
+cp .env.example .env
+
+# 2. 一键后台启动服务
+docker compose up -d
+
+# 3. 查验容器运行日志
+docker compose logs -f
+```
+
+#### 4.2 方式 B：Docker 原生运行
+
+```bash
+docker run -d \
+  --name mcp-server-rocketmq \
+  -p 8080:8080 \
+  -e MCP_ROCKETMQ_NAMESRV_ADDR="192.168.1.100:9876" \
+  -e MCP_ROCKETMQ_ENDPOINTS="192.168.1.100:8081" \
+  -e MCP_ROCKETMQ_READ_ONLY="false" \
+  ghcr.io/atengk/mcp-server-rocketmq:latest
+```
+
+#### 4.3 方式 C：可执行 Jar 运行
+
+```bash
+java -jar mcp-server-rocketmq-1.0.0.jar \
   --server.port=8080 \
   --rocketmq.namesrv-addr=192.168.1.100:9876 \
   --rocketmq.endpoints=192.168.1.100:8081 \
   --rocketmq.read-only=false
 ```
 
-**以 Docker 容器启动**：
-```bash
-docker run -d \
-  --name mcp-server-rocketmq \
-  -p 8080:8080 \
-  -e ROCKETMQ_NAMESRV_ADDR="192.168.1.100:9876" \
-  -e ROCKETMQ_ENDPOINTS="192.168.1.100:8081" \
-  -e ROCKETMQ_READ_ONLY="false" \
-  ghcr.io/atengk/mcp-server-rocketmq:latest
-```
+#### 4.4 AI Agent 客户端接入 (SSE URL)
 
-#### 2.2 客户端通用配置 (SSE / HTTP 接入)
-
-在支持网络 MCP 连接的客户端中，配置 URL 端点即可：
+在支持远程 URL 连接的 AI Agent 客户端中配置：
 
 ```json
 {
@@ -323,76 +431,184 @@ docker run -d \
 }
 ```
 
-- **SSE 监听端点**：`http://your-server-ip:8080/mcp/sse`
-- **消息交互端点**：`http://your-server-ip:8080/mcp/message`
+- **SSE 建立连接端点**：`http://your-server-ip:8080/mcp/sse`
+- **消息发送交互端点**：`http://your-server-ip:8080/mcp/message`
+
+---
+
+### 5. 🌟 企业级多环境与多集群 MCP 协同实践 (Multi-Environment Setup)
+
+在真实企业研发运维中，最推荐的实践是**在同一个 AI Agent 客户端中同时并列挂载多个环境的 RocketMQ 服务端连接**（如 `rocketmq-dev`、`rocketmq-test`、`rocketmq-prod`），并通过分级安全守卫实施严格的权限管控。
+
+#### 5.1 多环境分级安全推荐矩阵
+
+| 环境标识 (Key) | 连接目标 | ACL 认证 | 只读守卫 (`MCP_ROCKETMQ_READ_ONLY`) | 破坏性防呆 (`MCP_ROCKETMQ_ENABLE_DESTRUCTIVE_TOOLS`) | 适用场景与安全设计 |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **`rocketmq-dev`** | 本地/开发集群 | 可选 | `false` (允许写) | `true` (激活破坏性工具) | 日常功能研发、Topic 动态建改、位点调试自愈 |
+| **`rocketmq-test`** | 集成测试集群 | 基础 ACL | `false` (允许写) | `false` (锁定破坏性工具) | 集成验证、测试消息发送（禁止删除Topic与改位点） |
+| **`rocketmq-prod`** | 生产核心集群 | 企业级 AK/SK | `true` (**强开启只读**) | `false` (**硬锁定破坏性工具**) | 线上监控巡检、大盘积压排查、死信原因分析 |
+
+#### 5.2 本地 Stdio 模式多环境配置示例
+
+在 AI 客户端通用配置文件中，并列声明多个服务实例：
+
+```json
+{
+  "mcpServers": {
+    "rocketmq-dev": {
+      "command": "java",
+      "args": [
+        "-jar", "/path/to/mcp-server-rocketmq-1.0.0.jar",
+        "--mcp.transport=stdio",
+        "--spring.ai.mcp.server.name=rocketmq-dev"
+      ],
+      "env": {
+        "MCP_ROCKETMQ_NAMESRV_ADDR": "127.0.0.1:9876",
+        "MCP_ROCKETMQ_ENDPOINTS": "127.0.0.1:8081",
+        "MCP_ROCKETMQ_READ_ONLY": "false",
+        "MCP_ROCKETMQ_ENABLE_DESTRUCTIVE_TOOLS": "true"
+      }
+    },
+    "rocketmq-test": {
+      "command": "java",
+      "args": [
+        "-jar", "/path/to/mcp-server-rocketmq-1.0.0.jar",
+        "--mcp.transport=stdio",
+        "--spring.ai.mcp.server.name=rocketmq-test"
+      ],
+      "env": {
+        "MCP_ROCKETMQ_NAMESRV_ADDR": "192.168.10.20:9876",
+        "MCP_ROCKETMQ_ENDPOINTS": "192.168.10.20:8081",
+        "MCP_ROCKETMQ_READ_ONLY": "false",
+        "MCP_ROCKETMQ_ENABLE_DESTRUCTIVE_TOOLS": "false"
+      }
+    },
+    "rocketmq-prod": {
+      "command": "java",
+      "args": [
+        "-jar", "/path/to/mcp-server-rocketmq-1.0.0.jar",
+        "--mcp.transport=stdio",
+        "--spring.ai.mcp.server.name=rocketmq-prod"
+      ],
+      "env": {
+        "MCP_ROCKETMQ_NAMESRV_ADDR": "10.0.100.1:9876;10.0.100.2:9876",
+        "MCP_ROCKETMQ_ENDPOINTS": "10.0.100.1:8081",
+        "MCP_ROCKETMQ_ACCESS_KEY": "prod_access_key",
+        "MCP_ROCKETMQ_SECRET_KEY": "prod_secret_key",
+        "MCP_ROCKETMQ_READ_ONLY": "true",
+        "MCP_ROCKETMQ_ENABLE_DESTRUCTIVE_TOOLS": "false"
+      }
+    }
+  }
+}
+```
+
+#### 5.3 远程 SSE 模式多环境接入示例
+
+若服务端以容器微服务形态运行于各网络集群内部，客户端只需配置各环境对应 URL：
+
+```json
+{
+  "mcpServers": {
+    "rocketmq-dev": {
+      "url": "http://rocketmq-mcp-dev.internal:8080/mcp/sse"
+    },
+    "rocketmq-test": {
+      "url": "http://rocketmq-mcp-test.internal:8080/mcp/sse"
+    },
+    "rocketmq-prod": {
+      "url": "https://rocketmq-mcp-prod.internal:8443/mcp/sse"
+    }
+  }
+}
+```
+
 
 ---
 
 ## ⚙️ 完整环境变量与参数清单
 
-支持通过 **系统环境变量** 或 **命令行参数（Spring 风格）** 自由配置：
+优先读取标准 `MCP_ROCKETMQ_*` 前缀环境变量，同时平滑兼容无前缀形式：
 
-| 环境变量 | 命令行参数 | 默认值 | 详细说明 | 示例 |
+| 推荐环境变量 | 命令行参数 | 默认值 | 详细说明 | 示例 |
 | :--- | :--- | :--- | :--- | :--- |
-| `ROCKETMQ_NAMESRV_ADDR` | `--rocketmq.namesrv-addr` | `127.0.0.1:9876` | RocketMQ NameServer 集群地址（多节点用分号分隔） | `192.168.1.10:9876;192.168.1.11:9876` |
-| `ROCKETMQ_ENDPOINTS` | `--rocketmq.endpoints` | `127.0.0.1:8081` | RocketMQ 5.x gRPC Proxy 服务端点 | `192.168.1.10:8081` |
-| `ROCKETMQ_ACCESS_KEY` | `--rocketmq.access-key` | - | ACL 访问认证密钥 AccessKey（可选） | `rocketmq2` |
-| `ROCKETMQ_SECRET_KEY` | `--rocketmq.secret-key` | - | ACL 访问认证密钥 SecretKey（可选） | `12345678` |
-| `ROCKETMQ_READ_ONLY` | `--rocketmq.read-only` | `false` | 全局只读守卫开关（开启后禁止所有写操作） | `true` |
-| `ROCKETMQ_ENABLE_DESTRUCTIVE_TOOLS` | `--rocketmq.enable-destructive-tools` | `false` | 破坏性高危工具激活开关（删除Topic/重置位点等） | `true` |
+| `MCP_ROCKETMQ_NAMESRV_ADDR` | `--rocketmq.namesrv-addr` | `127.0.0.1:9876` | RocketMQ NameServer 集群地址（多节点用分号分隔） | `192.168.1.10:9876;192.168.1.11:9876` |
+| `MCP_ROCKETMQ_ENDPOINTS` | `--rocketmq.endpoints` | `127.0.0.1:8081` | RocketMQ 5.x gRPC Proxy 服务端点 | `192.168.1.10:8081` |
+| `MCP_ROCKETMQ_ACCESS_KEY` | `--rocketmq.access-key` | - | ACL 访问认证密钥 AccessKey（可选，Remoting与gRPC通用） | `rocketmq2` |
+| `MCP_ROCKETMQ_SECRET_KEY` | `--rocketmq.secret-key` | - | ACL 访问认证密钥 SecretKey（可选，Remoting与gRPC通用） | `12345678` |
+| `MCP_ROCKETMQ_READ_ONLY` | `--rocketmq.read-only` | `false` | 全局只读守卫开关（开启后禁止所有写操作） | `true` |
+| `MCP_ROCKETMQ_ENABLE_DESTRUCTIVE_TOOLS` | `--rocketmq.enable-destructive-tools` | `false` | 破坏性高危工具激活开关（双层防呆第1层） | `true` |
 | `MCP_TRANSPORT` | `--mcp.transport` | `sse` | 运行通信传输模式（`sse` 或 `stdio`） | `stdio` |
-| `PORT` / `SERVER_PORT` | `--server.port` | `8080` | SSE 模式下的 Web 监听端口 | `8088` |
+| `MCP_SERVER_PORT` / `SERVER_PORT` | `--server.port` | `8080` | SSE 模式下的 Web 监听端口 | `8088` |
+| `SPRING_PROFILES_ACTIVE` | `--spring.profiles.active` | `default` | 激活的多环境配置（如 `dev`、`prod`） | `prod` |
 
 ---
 
 ## ❓ 常见问题与排错指南 (FAQ)
 
-### Q1: 在 Claude Desktop / Cursor 中使用 Stdio 模式报错 `JSON-RPC parse error`？
+### Q1: 在 AI Agent 宿主中使用 Stdio 模式报错 `JSON-RPC parse error`？
 - **原因**：Spring Boot 启动日志、ASCII Banner 或第三方组件的调试信息混入到了标准输出 `System.out` 中。
 - **解决办法**：
   1. 确保启动参数中包含 `--mcp.transport=stdio`，项目内置的环境处理器会自动关闭 Banner 并将全部 Logback 日志定向至 `System.err`；
-  2. 严禁在代码中自行调用 `System.out.println`，统一使用 SLF4J 记录日志。
+  2. 严禁在业务中调用 `System.out.println`，代码统一使用 SLF4J 记录日志。
 
 ### Q2: 使用 Docker 运行时，报错无法连接 NameServer (`127.0.0.1:9876`)？
 - **原因**：容器内的 `127.0.0.1` 指向容器自身环境，而非宿主机。
 - **解决办法**：
-  - 如果 RocketMQ 部署在宿主机，请将环境变量配置为 `ROCKETMQ_NAMESRV_ADDR=host.docker.internal:9876`；
-  - Linux 环境可使用 `--net=host` 模式启动容器。
+  - 如果 RocketMQ 部署在宿主机，请将环境变量配置为 `MCP_ROCKETMQ_NAMESRV_ADDR=host.docker.internal:9876`；
+  - 推荐直接使用项目提供的 `docker-compose.yml`，已默认预设 `extra_hosts` 宿主机网关映射。
 
-### Q3: 为什么调用 `rocketmq_delete_topic` 或 `rocketmq_reset_consumer_offset` 提示 403 权限被拒绝？
+### Q3: 为什么调用 `rocketmq_delete_topic` 或 `rocketmq_reset_consumer_offset` 提示权限被拦截拒绝？
 - **原因**：触发了系统的双层防呆安全机制（详见 [ADR 0002](./docs/adr/0002-dual-layer-safety-guard.md)）。
 - **解决办法**：
-  1. 服务端启动环境变量必须显式配置 `ROCKETMQ_ENABLE_DESTRUCTIVE_TOOLS=true`；
-  2. 调用该工具时，入参中必须显式传递 `confirm: true` 参数。
+  1. 服务端启动环境变量必须显式配置 `MCP_ROCKETMQ_ENABLE_DESTRUCTIVE_TOOLS=true`；
+  2. AI 宿主在调用该工具时，入参中必须显式传递 `confirm: true` 参数。
 
 ### Q4: 我的集群是 RocketMQ 4.x（没有 gRPC Proxy），能使用本项目吗？
 - **解答**：**完全可以使用绝大部分功能！**
   - 集群拓扑、Broker 指标、Topic 增删改查、消费组状态审计、实时 Lag 积压排查、位点重置以及死信检索等 **17 项运维管理与排障工具均基于 Remoting 协议**，原生完美向下兼容 4.x；
   - 仅有 `rocketmq_send_message` 测试发送工具依赖 5.x gRPC Proxy。
 
+### Q5: 跨网络或容器部署连接 RocketMQ 报错连接超时或网络不通？
+- **原因**：RocketMQ 采用两阶段路由通信模型。客户端先连接 NameServer (`9876`) 获取路由元数据，随后由 NameServer 返回 Broker 节点的注册 IP/端口并直连 Broker；gRPC 则连接 Proxy (`8081`)。如果位于不同网络、容器或云安全组中，仅放通 NameServer 无法完成后续数据通信。
+- **排查与解决办法**：
+  1. **放通核心服务端口**：
+     - `9876`: NameServer 服务端口（Remoting 路由寻址，必须通）；
+     - `8081`: RocketMQ 5.x Proxy 服务端口（gRPC 消息交互，测试发信需要）；
+     - `10911` / `10909`: Broker 默认 Remoting 监听端口与 VIP 端口（必须与客户端互通）；
+  2. **Broker 广播地址 (brokerIP1)**：
+     - 若 Broker 运行在 Docker 容器或云私有网络中，Broker 会默认将容器内网 IP 注册给 NameServer，导致外部客户端拿到的地址无法访问。请在 Broker 配置文件（`broker.conf`）中显式配置 `brokerIP1=<宿主机公网或可达内网IP>`。
+
 ---
 
-## 📂 工程目录结构
+## 📂 工程目录结构与架构决策 (ADRs)
 
 ```text
 .
 ├── .github/
-│   ├── ISSUE_TEMPLATE/             # 结构化 Issue 反馈模版
 │   ├── workflows/
-│   │   ├── ci.yml                  # 业务构建与 PR 标题校验流水线
-│   │   └── release.yml             # 基于 Git Tag 的自动化发版流水线
+│   │   ├── ci.yml                  # 自动化质量门禁流水线 (JDK 21 + mvn verify)
+│   │   └── release.yml             # 三位一体自动化发版流水线 (Fat Jar / Packages / GHCR)
+│   ├── ISSUE_TEMPLATE/             # 结构化 Issue 反馈模版
 │   └── PULL_REQUEST_TEMPLATE.md    # PR 提交审核模版
 ├── docs/
-│   ├── adr/                        # 架构决策记录 (ADR 0001 ~ 0005)
+│   ├── adr/                        # 核心架构决策记录 (ADR 0001 ~ 0008)
+│   │   ├── 0001-hybrid-client-architecture.md
+│   │   ├── 0002-dual-layer-safety-guard.md
+│   │   ├── 0003-single-jar-dual-mode-transport.md
+│   │   ├── 0004-mcp-full-specification-and-body-truncation.md
+│   │   ├── 0005-dependency-matrix-and-runtime-baseline.md
+│   │   ├── 0006-containerization-and-release-pipeline.md
+│   │   ├── 0007-package-namespace-and-maven-coordinates.md
+│   │   └── 0008-client-lifecycle-hardening-and-resilience.md
 │   └── agents/                     # 智能体工程协作规范 (Issue/Triage/Domain)
-├── .cliff.toml                     # git-cliff 变更日志自动化配置
-├── .editorconfig                   # 跨编辑器编码规范
-├── .gitattributes                  # 跨平台 LF 换行归一化
-├── .gitignore                      # 跨语言通用忽略清单
+├── Dockerfile                      # Temurin JRE 21 Alpine 多阶段构建镜像
+├── docker-compose.yml              # 容器编排一键启动模版
+├── .env.example                    # 环境变量配置示例
 ├── AGENTS.md                       # 智能体行为与技能准则
 ├── CONTEXT.md                      # 领域核心术语表与统一语言
 ├── CONTRIBUTING.md                 # 贡献指南与 Commit 规范
-├── LICENSE                         # 开源许可证 (Apache-2.0)
+├── pom.xml                         # Maven 核心配置 (io.github.atengk)
 └── README.md                       # 项目主文档
 ```
 
