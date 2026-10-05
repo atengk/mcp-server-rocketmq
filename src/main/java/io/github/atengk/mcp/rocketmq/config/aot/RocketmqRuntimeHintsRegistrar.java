@@ -91,6 +91,20 @@ public class RocketmqRuntimeHintsRegistrar implements RuntimeHintsRegistrar {
         for (Class<?> clazz : EXPLICIT_CLASSES) {
             registerType(hints, clazz);
         }
+
+        // 4. 注册 Spring Boot 4 启动反射探测类（防范 Native 运行期 Deducer 反射缺失）
+        String[] deducerClassNames = {
+                "org.springframework.boot.webmvc.WebMvcWebApplicationTypeDeducer",
+                "org.springframework.boot.webflux.WebFluxWebApplicationTypeDeducer",
+                "org.springframework.boot.webmvc.autoconfigure.JspTemplateAvailabilityProvider"
+        };
+        for (String deducerName : deducerClassNames) {
+            try {
+                Class<?> deducerClass = ClassUtils.forName(deducerName, targetLoader);
+                registerType(hints, deducerClass);
+            } catch (Throwable ignored) {
+            }
+        }
     }
 
     private void registerType(RuntimeHints hints, Class<?> clazz) {

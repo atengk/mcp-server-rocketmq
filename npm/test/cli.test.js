@@ -91,10 +91,21 @@ describe('Node.js CLI 端到端子进程防御与 Stdio 纯净性测试 (接缝 
   });
 
   it('当目标平台二进制缺失时，必须在 stderr 提示并以非零码退出且 stdout 零污染', () => {
-    // 默认测试环境下尚未放入真实二进制，直接触发执行 cli.js 校验缺失防御
-    const res = spawnSync(process.execPath, [cliPath], {
+    // 构造隔离的临时目录以确保同级相对路径下无任何预置的平台二进制
+    const tempDir = fs.mkdtempSync(path.join(path.resolve(__dirname, '..'), 'tmp-missing-'));
+    const isolatedBinDir = path.join(tempDir, 'bin');
+    fs.mkdirSync(isolatedBinDir, { recursive: true });
+    const isolatedCliPath = path.join(isolatedBinDir, 'cli.js');
+    fs.copyFileSync(cliPath, isolatedCliPath);
+
+    const res = spawnSync(process.execPath, [isolatedCliPath], {
+      cwd: tempDir,
       encoding: 'utf8'
     });
+
+    try {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    } catch {}
 
     assert.equal(res.status, 1, '未能找到二进制时应以状态码 1 退出');
     assert.equal(res.stdout, '', 'stdout 标准输出必须绝对纯净 (0 字节)');
