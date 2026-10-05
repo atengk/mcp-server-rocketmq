@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ghcr.io/ateng/mcp-server-rocketmq:${MCP_TAG:-latest}
+    image: ghcr.io/atengk/mcp-server-rocketmq:${MCP_TAG:-latest}
     container_name: mcp-server-rocketmq
     restart: unless-stopped
     ports:
