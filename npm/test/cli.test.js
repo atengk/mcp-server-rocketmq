@@ -16,26 +16,30 @@ const cli = require('../@atengk/mcp-server-rocketmq/bin/cli.js');
 
 describe('Node.js CLI 调度器单元与契约测试', () => {
 
-  it('应该正确定义三大平台包与原生二进制契约', () => {
+  it('应该正确定义四大平台包与原生二进制契约', () => {
     const platforms = cli.SUPPORTED_PLATFORMS;
     assert.deepEqual(Object.keys(platforms).sort(), [
       'darwin-arm64',
+      'linux-arm64',
       'linux-x64',
       'win32-x64'
     ]);
 
     assert.equal(platforms['win32-x64'].binary, 'mcp-server-rocketmq.exe');
     assert.equal(platforms['linux-x64'].binary, 'mcp-server-rocketmq');
+    assert.equal(platforms['linux-arm64'].binary, 'mcp-server-rocketmq');
     assert.equal(platforms['darwin-arm64'].binary, 'mcp-server-rocketmq');
 
     assert.equal(platforms['win32-x64'].pkg, '@atengk/mcp-server-rocketmq-win32-x64');
     assert.equal(platforms['linux-x64'].pkg, '@atengk/mcp-server-rocketmq-linux-x64');
+    assert.equal(platforms['linux-arm64'].pkg, '@atengk/mcp-server-rocketmq-linux-arm64');
     assert.equal(platforms['darwin-arm64'].pkg, '@atengk/mcp-server-rocketmq-darwin-arm64');
   });
 
   it('应该根据操作系统与架构生成标准平台标识', () => {
     assert.equal(cli.getPlatformKey('win32', 'x64'), 'win32-x64');
     assert.equal(cli.getPlatformKey('linux', 'x64'), 'linux-x64');
+    assert.equal(cli.getPlatformKey('linux', 'arm64'), 'linux-arm64');
     assert.equal(cli.getPlatformKey('darwin', 'arm64'), 'darwin-arm64');
     assert.equal(cli.getPlatformKey('darwin', 'x64'), 'darwin-x64');
     assert.equal(cli.getPlatformKey('freebsd', 'x64'), 'freebsd-x64');
@@ -63,6 +67,10 @@ describe('Node.js CLI 调度器单元与契约测试', () => {
   it('对未知不受支持的平台应该返回 null 寻址结果', () => {
     assert.equal(cli.resolveBinaryPath('sunos-x64'), null);
     assert.equal(cli.resolveBinaryPath('linux-arm'), null);
+  });
+
+  it('当受支持平台未预置或安装二进制时应该安全返回 null 寻址结果', () => {
+    assert.equal(cli.resolveBinaryPath('linux-arm64'), null);
   });
 });
 

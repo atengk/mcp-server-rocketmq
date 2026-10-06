@@ -34,6 +34,7 @@
   "optionalDependencies": {
     "@atengk/mcp-server-rocketmq-win32-x64": "1.0.0",
     "@atengk/mcp-server-rocketmq-linux-x64": "1.0.0",
+    "@atengk/mcp-server-rocketmq-linux-arm64": "1.0.0",
     "@atengk/mcp-server-rocketmq-darwin-arm64": "1.0.0"
   }
 }

@@ -22,6 +22,10 @@ const SUPPORTED_PLATFORMS = {
     pkg: '@atengk/mcp-server-rocketmq-linux-x64',
     binary: 'mcp-server-rocketmq'
   },
+  'linux-arm64': {
+    pkg: '@atengk/mcp-server-rocketmq-linux-arm64',
+    binary: 'mcp-server-rocketmq'
+  },
   'darwin-arm64': {
     pkg: '@atengk/mcp-server-rocketmq-darwin-arm64',
     binary: 'mcp-server-rocketmq'

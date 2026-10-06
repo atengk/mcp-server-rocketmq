@@ -1,0 +1,30 @@
+{
+  "name": "@atengk/mcp-server-rocketmq-linux-arm64",
+  "version": "1.0.0",
+  "description": "Linux arm64 native binary for @atengk/mcp-server-rocketmq",
+  "keywords": [
+    "mcp",
+    "rocketmq",
+    "linux-arm64"
+  ],
+  "homepage": "https://github.com/atengk/mcp-server-rocketmq",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/atengk/mcp-server-rocketmq.git"
+  },
+  "license": "Apache-2.0",
+  "author": "Ateng",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "bin/",
+    "README.md"
+  ],
+  "bin": {
+    "mcp-server-rocketmq": "bin/mcp-server-rocketmq"
+  }
+}

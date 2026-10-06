@@ -92,4 +92,13 @@ _Avoid_: Node 重写, 运行容器, 外挂代理
 向 GraalVM 静态分析引擎显式声明的动态反射、JNI、资源文件及序列化白名单元数据契约，用于攻克 RocketMQ 遗留 Remoting 客户端在 Native 编译下的类加载黑盒。
 _Avoid_: 反射补丁, 动态配置, 降级开关
 
+**Four-Platform Native Matrix (四平台原生矩阵)**:
+构建并分发原生可执行文件的四大多架构黄金支柱，涵盖 `linux-x64`、`linux-arm64`、`win32-x64` 与 `darwin-arm64`，覆盖绝大多数生产服务器与开发者设备。
+_Avoid_: 全平台通配, 32位支持
+
+**Versioned Asset Naming (版本化发布资产规范)**:
+GitHub Releases 独立可执行二进制附件统一包含精确发版版本号的命名契约（`mcp-server-rocketmq-{version}-{platform}[.exe]`），便于离线部署与版本审计。
+_Avoid_: 静态固定命名, 裸平台名
+
+
 
