@@ -49,6 +49,7 @@ npx @atengk/mcp-server-rocketmq --rocketmq.namesrv-addr="127.0.0.1:9876"
 | :--- | :--- | :--- |
 | Windows | x64 | `@atengk/mcp-server-rocketmq-win32-x64` |
 | Linux | x64 (glibc) | `@atengk/mcp-server-rocketmq-linux-x64` |
+| Linux | arm64 (glibc / aarch64) | `@atengk/mcp-server-rocketmq-linux-arm64` |
 | macOS | arm64 (Apple Silicon) | `@atengk/mcp-server-rocketmq-darwin-arm64` |
 
 > 若当前运行环境不在上述列表中（例如 Linux musl / Alpine），包装器将在 `stderr` 输出明确指引，推荐使用官方 Docker 镜像 `ghcr.io/atengk/mcp-server-rocketmq:latest` 运行。

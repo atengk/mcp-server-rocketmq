@@ -69,8 +69,18 @@ describe('Node.js CLI 调度器单元与契约测试', () => {
     assert.equal(cli.resolveBinaryPath('linux-arm'), null);
   });
 
-  it('当受支持平台未预置或安装二进制时应该安全返回 null 寻址结果', () => {
-    assert.equal(cli.resolveBinaryPath('linux-arm64'), null);
+  it('在无预置二进制的隔离沙盒环境中解析受支持平台应安全返回 null', () => {
+    const tempDir = fs.mkdtempSync(path.join(path.resolve(__dirname, '..'), 'tmp-empty-'));
+    try {
+      const isolatedCliPath = path.join(tempDir, 'cli.js');
+      const originalCliPath = path.resolve(__dirname, '..', '@atengk/mcp-server-rocketmq', 'bin', 'cli.js');
+      fs.copyFileSync(originalCliPath, isolatedCliPath);
+      const isolatedCli = require(isolatedCliPath);
+      assert.equal(isolatedCli.resolveBinaryPath('linux-arm64'), null);
+      assert.equal(isolatedCli.resolveBinaryPath('win32-x64'), null);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });
 

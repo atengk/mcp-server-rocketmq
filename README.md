@@ -11,6 +11,9 @@
   <a href="https://github.com/atengk/mcp-server-rocketmq/releases">
     <img src="https://img.shields.io/github/v/release/atengk/mcp-server-rocketmq?style=flat-square" alt="Release" />
   </a>
+  <a href="https://www.npmjs.com/package/@atengk/mcp-server-rocketmq">
+    <img src="https://img.shields.io/npm/v/@atengk/mcp-server-rocketmq.svg?style=flat-square" alt="npm version" />
+  </a>
   <a href="https://rocketmq.apache.org/">
     <img src="https://img.shields.io/badge/RocketMQ-5.x-orange.svg?style=flat-square" alt="Apache RocketMQ 5" />
   </a>
@@ -246,15 +249,26 @@ flowchart TD
 
 ### 1. 📥 快速获取与安装 (Download & Pull)
 
-你可以直接下载预编译二进制包或拉取官方轻量容器镜像：
+`mcp-server-rocketmq` 支持多种获取与安装姿势，无论你是否具备 Java 环境，都能极速接入：
 
-- **方式一：下载预编译可执行 Jar（推荐）**  
-  访问 [GitHub Releases](https://github.com/atengk/mcp-server-rocketmq/releases) 下载最新发行版 Fat Jar（例如 `mcp-server-rocketmq-1.0.0.jar`，附带 SHA-256 校验和），直接基于本地 JRE 21+ 运行。
-- **方式二：拉取预构建 Docker 镜像**  
+- **方式一：通过 npm / npx 零门槛即时启动（🔥 首选极速推荐）**  
+  零 JRE 依赖，无需安装 Java 或 Docker，Node.js 环境下一行命令即开即用（支持 macOS Apple Silicon、Linux x64、Linux ARM64 及 Windows x64）：
+  ```bash
+  npx -y @atengk/mcp-server-rocketmq --rocketmq.namesrv-addr="127.0.0.1:9876"
+  ```
+- **方式二：直接下载 GitHub Releases 独立原生二进制（离线脱机极速秒开）**  
+  访问 [GitHub Releases](https://github.com/atengk/mcp-server-rocketmq/releases) 获取经过 GraalVM Native AOT 编译的单文件原生可执行程序，无需任何外部运行时依赖，启动仅需 50ms、内存占用仅 30MB 左右：
+  - `mcp-server-rocketmq-1.2.0-linux-x64`（Linux x86_64 / glibc）
+  - `mcp-server-rocketmq-1.2.0-linux-arm64`（Linux AArch64 / ARM64 / 鲲鹏 / AWS Graviton）
+  - `mcp-server-rocketmq-1.2.0-win32-x64.exe`（Windows x86_64）
+  - `mcp-server-rocketmq-1.2.0-darwin-arm64`（macOS Apple Silicon M 系列）
+- **方式三：下载跨平台通用 Fat Jar（传统 JVM 环境）**  
+  从 [GitHub Releases](https://github.com/atengk/mcp-server-rocketmq/releases) 下载 `mcp-server-rocketmq-1.2.0.jar`（附带 `checksums.txt` 校验和），直接基于本地 JRE 21+ 运行。
+- **方式四：拉取官方多架构 Docker 镜像**  
   ```bash
   docker pull ghcr.io/atengk/mcp-server-rocketmq:latest
   ```
-- **方式三：从源码本地编译构建**  
+- **方式五：从源码本地编译构建**  
   ```bash
   git clone https://github.com/atengk/mcp-server-rocketmq.git
   cd mcp-server-rocketmq
@@ -310,7 +324,56 @@ java -jar mcp-server-rocketmq-1.0.0.jar --spring.profiles.active=prod
 
 在 Stdio 模式下，AI 宿主客户端（如 Claude Desktop、Antigravity、Cursor、Cline、Windsurf 等）会启动服务端进程作为本地子进程，并通过标准输入输出流交换 JSON-RPC 报文。
 
-#### 3.1 使用 Java Jar 运行 (本地宿主环境)
+#### 3.1 使用 npx 运行（🔥 首选极速模式，零 Java 依赖）
+
+无需预先安装 Java 环境，依托 GraalVM Native AOT 原生预编译二进制，Node.js 环境下 `npx` 自动按当前操作系统架构秒级调度匹配的平台包：
+
+```json
+{
+  "mcpServers": {
+    "rocketmq": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@atengk/mcp-server-rocketmq"
+      ],
+      "env": {
+        "MCP_ROCKETMQ_NAMESRV_ADDR": "127.0.0.1:9876",
+        "MCP_ROCKETMQ_ENDPOINTS": "127.0.0.1:8081",
+        "MCP_ROCKETMQ_READ_ONLY": "false",
+        "MCP_ROCKETMQ_ENABLE_DESTRUCTIVE_TOOLS": "false"
+      }
+    }
+  }
+}
+```
+
+> 💡 **自动平台路由机制**：  
+> 主包 `@atengk/mcp-server-rocketmq` 会自动解析运行平台并调度对应的原生二进制（Windows x64 / Linux x64 / Linux arm64 / macOS arm64），且启动器内部严格遵循 [ADR 0003](./docs/adr/0003-single-jar-dual-mode-transport.md)，确保 `stdout` 零污染。
+
+#### 3.2 使用各平台单文件原生二进制运行（脱机离线，极速冷启动）
+
+若你的机器处于内网离线环境，从 [GitHub Releases](https://github.com/atengk/mcp-server-rocketmq/releases) 下载单文件原生可执行程序后，可直接作为可执行程序配置运行：
+
+```json
+{
+  "mcpServers": {
+    "rocketmq": {
+      "command": "/path/to/mcp-server-rocketmq-1.2.0-linux-x64",
+      "args": [
+        "--mcp.transport=stdio"
+      ],
+      "env": {
+        "MCP_ROCKETMQ_NAMESRV_ADDR": "127.0.0.1:9876",
+        "MCP_ROCKETMQ_ENDPOINTS": "127.0.0.1:8081"
+      }
+    }
+  }
+}
+```
+*(Windows 用户将 `command` 指定为 `C:\\path\\to\\mcp-server-rocketmq-1.2.0-win32-x64.exe` 即可)*
+
+#### 3.3 使用 Java Jar 运行 (本地 JVM 宿主环境)
 
 确保本机已安装 JDK 21，在 AI Agent 通用配置文件中增加：
 
@@ -321,7 +384,7 @@ java -jar mcp-server-rocketmq-1.0.0.jar --spring.profiles.active=prod
       "command": "java",
       "args": [
         "-jar",
-        "/path/to/mcp-server-rocketmq-1.0.0.jar",
+        "/path/to/mcp-server-rocketmq-1.2.0.jar",
         "--mcp.transport=stdio"
       ],
       "env": {
@@ -338,7 +401,7 @@ java -jar mcp-server-rocketmq-1.0.0.jar --spring.profiles.active=prod
 > 💡 **标准输出纯净化保障**：
 > 启动参数包含 `--mcp.transport=stdio` 时，内置环境后置处理器会自动剔除 Web 容器、关闭 Banner 并将全部日志重定向至 `System.err`，保证 `System.out` 100% 纯净流通 JSON-RPC，杜绝报文解析崩溃（详见 [ADR 0003](./docs/adr/0003-single-jar-dual-mode-transport.md)）。
 
-#### 3.2 使用 Docker 容器作为 Stdio 运行 (免本地 Java 环境)
+#### 3.4 使用 Docker 容器作为 Stdio 运行 (免本地 Java 环境)
 
 ```json
 {
@@ -592,7 +655,7 @@ java -jar mcp-server-rocketmq-1.0.0.jar \
 │   ├── ISSUE_TEMPLATE/             # 结构化 Issue 反馈模版
 │   └── PULL_REQUEST_TEMPLATE.md    # PR 提交审核模版
 ├── docs/
-│   ├── adr/                        # 核心架构决策记录 (ADR 0001 ~ 0008)
+│   ├── adr/                        # 核心架构决策记录 (ADR 0001 ~ 0010)
 │   │   ├── 0001-hybrid-client-architecture.md
 │   │   ├── 0002-dual-layer-safety-guard.md
 │   │   ├── 0003-single-jar-dual-mode-transport.md
@@ -600,7 +663,9 @@ java -jar mcp-server-rocketmq-1.0.0.jar \
 │   │   ├── 0005-dependency-matrix-and-runtime-baseline.md
 │   │   ├── 0006-containerization-and-release-pipeline.md
 │   │   ├── 0007-package-namespace-and-maven-coordinates.md
-│   │   └── 0008-client-lifecycle-hardening-and-resilience.md
+│   │   ├── 0008-client-lifecycle-hardening-and-resilience.md
+│   │   ├── 0009-graalvm-native-and-npm-distribution.md
+│   │   └── 0010-four-platform-native-matrix-and-asset-naming.md
 │   └── agents/                     # 智能体工程协作规范 (Issue/Triage/Domain)
 ├── Dockerfile                      # Temurin JRE 21 Alpine 多阶段构建镜像
 ├── docker-compose.yml              # 容器编排一键启动模版
