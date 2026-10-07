@@ -117,7 +117,14 @@ public class RocketmqRuntimeHintsRegistrar implements RuntimeHintsRegistrar {
                 "org.springframework.boot.autoconfigure.SharedMetadataReaderFactoryContextInitializer",
                 "org.springframework.boot.autoconfigure.logging.ConditionEvaluationReportLoggingListener",
                 "org.springframework.boot.autoconfigure.preinitialize.BackgroundPreinitializingApplicationListener",
-                "org.springframework.boot.context.event.EventPublishingRunListener"
+                "org.springframework.boot.context.event.EventPublishingRunListener",
+                "org.springframework.boot.logging.java.JavaLoggingSystem$Factory",
+                "org.springframework.boot.logging.java.JavaLoggingSystem",
+                "org.springframework.boot.logging.log4j2.Log4J2LoggingSystem$Factory",
+                "org.springframework.boot.logging.log4j2.Log4J2LoggingSystem",
+                "org.springframework.boot.logging.logback.LogbackLoggingSystem$Factory",
+                "org.springframework.boot.logging.logback.LogbackLoggingSystem",
+                "org.springframework.boot.io.ApplicationResourceLoader$FilePathResolver"
         };
         for (String className : springBootCoreClasses) {
             try {
