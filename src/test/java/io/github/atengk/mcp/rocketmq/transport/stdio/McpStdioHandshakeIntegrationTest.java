@@ -86,6 +86,13 @@ class McpStdioHandshakeIntegrationTest {
 
             // 2. 读取第一行响应，必须为纯净的 JSON-RPC 握手响应
             String initResponseLine = reader.readLine();
+            if (initResponseLine == null) {
+                process.waitFor(2, TimeUnit.SECONDS);
+                try {
+                    errThread.join(2000);
+                } catch (InterruptedException ignored) {
+                }
+            }
             assertThat(initResponseLine)
                     .withFailMessage("标准输出未能接收到有效响应行。子进程错误日志:\n" + errCapture.toString(StandardCharsets.UTF_8))
                     .isNotNull()
