@@ -23,8 +23,5 @@
   "files": [
     "bin/",
     "README.md"
-  ],
-  "bin": {
-    "mcp-server-rocketmq": "bin/mcp-server-rocketmq.exe"
-  }
+  ]
 }
