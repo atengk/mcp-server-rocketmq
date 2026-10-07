@@ -92,16 +92,37 @@ public class RocketmqRuntimeHintsRegistrar implements RuntimeHintsRegistrar {
             registerType(hints, clazz);
         }
 
-        // 4. 注册 Spring Boot 4 启动反射探测类（防范 Native 运行期 Deducer 反射缺失）
-        String[] deducerClassNames = {
+        // 4. 注册 Spring Boot 核心工厂类、推断器与上下文初始化器（防范 Native 运行期反射剪裁缺失）
+        String[] springBootCoreClasses = {
                 "org.springframework.boot.webmvc.WebMvcWebApplicationTypeDeducer",
                 "org.springframework.boot.webflux.WebFluxWebApplicationTypeDeducer",
-                "org.springframework.boot.webmvc.autoconfigure.JspTemplateAvailabilityProvider"
+                "org.springframework.boot.webmvc.autoconfigure.JspTemplateAvailabilityProvider",
+                "org.springframework.boot.web.server.context.ServerPortInfoApplicationContextInitializer",
+                "org.springframework.boot.web.server.context.WebServerInitializedEvent",
+                "org.springframework.boot.web.server.context.MissingWebServerFactoryBeanFailureAnalyzer",
+                "org.springframework.boot.web.server.PortInUseFailureAnalyzer",
+                "org.springframework.boot.web.server.reactive.context.ReactiveWebServerApplicationContextFactory",
+                "org.springframework.boot.web.server.servlet.context.ServletWebServerApplicationContextFactory",
+                "org.springframework.boot.web.context.reactive.FilteredReactiveWebContextResourceFilePathResolver",
+                "org.springframework.boot.web.context.servlet.ServletContextResourceFilePathResolver",
+                "org.springframework.boot.context.ConfigurationWarningsApplicationContextInitializer",
+                "org.springframework.boot.context.ContextIdApplicationContextInitializer",
+                "org.springframework.boot.io.ProtocolResolverApplicationContextInitializer",
+                "org.springframework.boot.ClearCachesApplicationListener",
+                "org.springframework.boot.builder.ParentContextCloserApplicationListener",
+                "org.springframework.boot.context.FileEncodingApplicationListener",
+                "org.springframework.boot.context.logging.LoggingApplicationListener",
+                "org.springframework.boot.support.AnsiOutputApplicationListener",
+                "org.springframework.boot.support.EnvironmentPostProcessorApplicationListener",
+                "org.springframework.boot.autoconfigure.SharedMetadataReaderFactoryContextInitializer",
+                "org.springframework.boot.autoconfigure.logging.ConditionEvaluationReportLoggingListener",
+                "org.springframework.boot.autoconfigure.preinitialize.BackgroundPreinitializingApplicationListener",
+                "org.springframework.boot.context.event.EventPublishingRunListener"
         };
-        for (String deducerName : deducerClassNames) {
+        for (String className : springBootCoreClasses) {
             try {
-                Class<?> deducerClass = ClassUtils.forName(deducerName, targetLoader);
-                registerType(hints, deducerClass);
+                Class<?> clazz = ClassUtils.forName(className, targetLoader);
+                registerType(hints, clazz);
             } catch (Throwable ignored) {
             }
         }
