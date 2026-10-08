@@ -15,12 +15,19 @@ spring:
   lifecycle:
     # 优雅停机各生命周期阶段超时宽限时间
     timeout-per-shutdown-phase: 20s
+  main:
+    # 默认关闭 Banner，确保标准输出绝对纯净 (ADR 0003)
+    banner-mode: off
+    # 默认作为命令行常驻进程运行，不启动内嵌 Web 容器；支持通过环境变量切换
+    web-application-type: ${SPRING_MAIN_WEB_APPLICATION_TYPE:none}
   ai:
     mcp:
       server:
         name: ${MCP_SERVER_NAME:mcp-server-rocketmq}
         version: 1.0.0
-        protocol: SSE
+        # 默认启用 Stdio 传输（作为 MCP 桌面与终端 CLI 核心模式，ADR 0009）
+        stdio: ${MCP_STDIO_ENABLED:true}
+        protocol: ${MCP_PROTOCOL:STREAMABLE}
         sse:
           sse-endpoint: /mcp/sse
           sse-message-endpoint: /mcp/message
