@@ -97,7 +97,7 @@ jobs:
           mvn versions:set "-DnewVersion=$ver" -DgenerateBackupPoms=false -B
 
       - name: 执行 GraalVM AOT 编译原生二进制
-        run: mvn clean native:compile -Pnative -DskipTests -B
+        run: mvn clean package -Pnative -DskipTests -B
 
       - name: 规范化产物命名 (Unix)
         if: runner.os != 'Windows'

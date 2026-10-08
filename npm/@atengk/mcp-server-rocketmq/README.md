@@ -7,8 +7,17 @@ Apache RocketMQ 5 Model Context Protocol (MCP) 原生二进制启动包装器。
 ### 1. 使用 npx 秒开运行 (无需预装 Java 环境)
 
 ```bash
-npx @atengk/mcp-server-rocketmq --rocketmq.namesrv-addr="127.0.0.1:9876"
+npx -y @atengk/mcp-server-rocketmq --rocketmq.namesrv-addr="127.0.0.1:9876"
 ```
+
+> 💡 **国内镜像加速**：若因网络环境下载较慢，可使用国内 npmmirror 镜像源加速拉取：
+> ```bash
+> # Linux / macOS
+> npm_config_registry=https://registry.npmmirror.com npx -y @atengk/mcp-server-rocketmq --rocketmq.namesrv-addr="127.0.0.1:9876"
+>
+> # Windows PowerShell
+> $env:npm_config_registry="https://registry.npmmirror.com"; npx -y @atengk/mcp-server-rocketmq --rocketmq.namesrv-addr="127.0.0.1:9876"
+> ```
 
 ### 2. 在 Claude Desktop 中配置
 

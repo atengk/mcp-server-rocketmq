@@ -132,10 +132,36 @@ function logErrorToStderr(title, details = []) {
 }
 
 /**
- * 执行主调度逻辑。
+ * 分流子进程 stdout 的单行数据：
+ * 若符合 JSON / JSON-RPC 格式（去首尾空白后以 '{' 或 '[' 开头），透传至 outStream；
+ * 否则旁路重定向至 errStream，坚守 Stdio 标准输出 100% 纯净性红线 (ADR 0003)。
+ *
+ * @param {string} line 待检查的单行文本
+ * @param {NodeJS.WritableStream} [outStream=process.stdout] 标准输出目标流
+ * @param {NodeJS.WritableStream} [errStream=process.stderr] 标准错误目标流
  */
-function run() {
-  const currentKey = getPlatformKey();
+function dispatchOutputLine(line, outStream = process.stdout, errStream = process.stderr) {
+  const trimmed = line.trim();
+  if (trimmed.length === 0) {
+    return;
+  }
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    outStream.write(line + '\n');
+  } else {
+    errStream.write(line + '\n');
+  }
+}
+
+/**
+ * 执行主调度逻辑。
+ *
+ * @param {object} [options={}] 可选自定义调度参数
+ * @param {string[]} [options.customSearchPaths] 自定义可执行文件搜索路径
+ * @param {string[]} [options.args] 自定义启动参数列表
+ * @param {string} [options.platformKey] 自定义平台标识
+ */
+function run(options = {}) {
+  const currentKey = options.platformKey || getPlatformKey();
   const platformInfo = SUPPORTED_PLATFORMS[currentKey];
 
   if (!platformInfo) {
@@ -149,7 +175,7 @@ function run() {
     process.exit(1);
   }
 
-  const binaryPath = resolveBinaryPath(currentKey);
+  const binaryPath = resolveBinaryPath(currentKey, options);
   if (!binaryPath) {
     logErrorToStderr(`未能找到平台原生可执行文件: ${platformInfo.binary}`, [
       `期望的平台安装包: ${platformInfo.pkg}`,
@@ -160,13 +186,32 @@ function run() {
     process.exit(1);
   }
 
-  const rawArgs = process.argv.slice(2);
+  const rawArgs = options.args || process.argv.slice(2);
   const finalArgs = buildArguments(rawArgs);
 
-  // 启动子进程，继承标准输入输出流以保障 MCP 协议通道通畅
+  // 启动子进程：stdin/stderr 继承，stdout 经由管道实施行级纯净拦截 (ADR 0003)
   const child = spawn(binaryPath, finalArgs, {
-    stdio: 'inherit',
+    stdio: ['inherit', 'pipe', 'inherit'],
     windowsHide: true
+  });
+
+  // 流式行级纯净分流守卫：确保只有合法 JSON-RPC 报文流入 stdout，杂质重定向至 stderr
+  let stdoutBuffer = '';
+  child.stdout.on('data', chunk => {
+    stdoutBuffer += chunk.toString('utf8');
+    let lineEndIndex;
+    while ((lineEndIndex = stdoutBuffer.indexOf('\n')) !== -1) {
+      const line = stdoutBuffer.slice(0, lineEndIndex);
+      stdoutBuffer = stdoutBuffer.slice(lineEndIndex + 1);
+      dispatchOutputLine(line);
+    }
+  });
+
+  child.stdout.on('end', () => {
+    if (stdoutBuffer.length > 0) {
+      dispatchOutputLine(stdoutBuffer);
+      stdoutBuffer = '';
+    }
   });
 
   // 转发进程终止信号以保证 RocketMQ 管理客户端连接优雅释放
@@ -207,5 +252,6 @@ module.exports = {
   resolveBinaryPath,
   buildArguments,
   logErrorToStderr,
+  dispatchOutputLine,
   run
 };

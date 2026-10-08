@@ -256,6 +256,14 @@ flowchart TD
   ```bash
   npx -y @atengk/mcp-server-rocketmq --rocketmq.namesrv-addr="127.0.0.1:9876"
   ```
+  > 💡 **国内加速提示**：若在国内网络环境下下载 npm 包较慢，可使用 npmmirror 镜像源加速下载：
+  > ```bash
+  > # Linux / macOS
+  > npm_config_registry=https://registry.npmmirror.com npx -y @atengk/mcp-server-rocketmq --rocketmq.namesrv-addr="127.0.0.1:9876"
+  >
+  > # Windows PowerShell
+  > $env:npm_config_registry="https://registry.npmmirror.com"; npx -y @atengk/mcp-server-rocketmq --rocketmq.namesrv-addr="127.0.0.1:9876"
+  > ```
 - **方式二：直接下载 GitHub Releases 独立原生二进制（离线脱机极速秒开）**  
   访问 [GitHub Releases](https://github.com/atengk/mcp-server-rocketmq/releases) 获取经过 GraalVM Native AOT 编译的单文件原生可执行程序，无需任何外部运行时依赖，启动仅需 50ms、内存占用仅 30MB 左右：
   - `mcp-server-rocketmq-1.2.0-linux-x64`（Linux x86_64 / glibc）
@@ -348,8 +356,9 @@ java -jar mcp-server-rocketmq-1.0.0.jar --spring.profiles.active=prod
 }
 ```
 
-> 💡 **自动平台路由机制**：  
-> 主包 `@atengk/mcp-server-rocketmq` 会自动解析运行平台并调度对应的原生二进制（Windows x64 / Linux x64 / Linux arm64 / macOS arm64），且启动器内部严格遵循 [ADR 0003](./docs/adr/0003-single-jar-dual-mode-transport.md)，确保 `stdout` 零污染。
+> 💡 **自动平台路由机制与国内加速**：  
+> 主包 `@atengk/mcp-server-rocketmq` 会自动解析运行平台并调度对应的原生二进制（Windows x64 / Linux x64 / Linux arm64 / macOS arm64），且启动器内部严格遵循 [ADR 0003](./docs/adr/0003-single-jar-dual-mode-transport.md)，通过行级智能分流过滤杂质，确保 `stdout` 零污染。  
+> 若在国内网络环境下拉取包较慢，亦可在配置的 `env` 中声明 `"npm_config_registry": "https://registry.npmmirror.com"` 加速下载。
 
 #### 3.2 使用各平台单文件原生二进制运行（脱机离线，极速冷启动）
 

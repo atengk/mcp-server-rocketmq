@@ -210,4 +210,80 @@ describe('Node.js CLI 端到端子进程防御与 Stdio 纯净性测试 (接缝 
     assert.ok(finalArgs.includes('--rocketmq.enable-destructive-tools=true'));
     assert.ok(finalArgs.includes('--mcp.transport=stdio'));
   });
+
+  it('dispatchOutputLine 应该精确区分 JSON-RPC 与非 JSON 杂质文本', () => {
+    let stdoutBuffer = '';
+    let stderrBuffer = '';
+    const mockOut = { write: s => { stdoutBuffer += s; } };
+    const mockErr = { write: s => { stderrBuffer += s; } };
+
+    // 1. 合法 JSON-RPC 对象单行 -> 必须流入 stdout
+    cli.dispatchOutputLine('{"jsonrpc":"2.0","id":1,"result":{}}', mockOut, mockErr);
+    assert.equal(stdoutBuffer, '{"jsonrpc":"2.0","id":1,"result":{}}\n');
+    assert.equal(stderrBuffer, '');
+
+    // 2. 带有前后空白的合法 JSON 数组 -> 必须流入 stdout
+    cli.dispatchOutputLine('  [{"method":"notify"}]  ', mockOut, mockErr);
+    assert.equal(stdoutBuffer, '{"jsonrpc":"2.0","id":1,"result":{}}\n  [{"method":"notify"}]  \n');
+    assert.equal(stderrBuffer, '');
+
+    // 3. Spring Boot Banner / 日志 / 错误异常栈杂质 -> 必须旁路流入 stderr
+    cli.dispatchOutputLine(':: Spring Boot :: (v4.1.0)', mockOut, mockErr);
+    cli.dispatchOutputLine('2026-10-08 ERROR LoggingFailureAnalysisReporter: failed', mockOut, mockErr);
+    assert.match(stderrBuffer, /:: Spring Boot ::/);
+    assert.match(stderrBuffer, /LoggingFailureAnalysisReporter/);
+
+    // 4. 空行 -> 安全忽略不产生任何多余流写入
+    const outBefore = stdoutBuffer;
+    const errBefore = stderrBuffer;
+    cli.dispatchOutputLine('   ', mockOut, mockErr);
+    assert.equal(stdoutBuffer, outBefore);
+    assert.equal(stderrBuffer, errBefore);
+  });
+
+  it('子进程混合输出时，调度器应该将杂质旁路重定向至 stderr 并保持 stdout 100% 纯净', () => {
+    const tempDir = fs.mkdtempSync(path.join(path.resolve(__dirname, '..'), 'tmp-test-'));
+    const isWin = process.platform === 'win32';
+    const mockBinName = isWin ? 'mock-native-mixed.exe' : 'mock-native-mixed';
+    const mockBinPath = path.join(tempDir, mockBinName);
+
+    fs.copyFileSync(process.execPath, mockBinPath);
+
+    // 模拟原生进程向 stdout 打印了 banner、报错以及有效 jsonrpc 报文
+    const mockPayload = [
+      ':: Spring Boot :: (v4.1.0)',
+      '2026-10-08 INFO McpServerRocketmqApplication starting',
+      '{"jsonrpc":"2.0","id":1,"result":{"capabilities":{}}}'
+    ];
+
+    const isolatedCliDir = path.join(tempDir, 'bin');
+    fs.mkdirSync(isolatedCliDir, { recursive: true });
+    const isolatedCliPath = path.join(isolatedCliDir, 'cli.js');
+    fs.copyFileSync(cliPath, isolatedCliPath);
+
+    const printScript = mockPayload.map(l => 'console.log(' + JSON.stringify(l) + ');').join(' ') + ' process.exit(0);';
+
+    const runnerScript = `
+      const cli = require(${JSON.stringify(isolatedCliPath)});
+      cli.run({
+        customSearchPaths: [${JSON.stringify(mockBinPath)}],
+        args: ['-e', ${JSON.stringify(printScript)}, '--']
+      });
+    `;
+
+    try {
+      const res = spawnSync(process.execPath, ['-e', runnerScript], {
+        encoding: 'utf8'
+      });
+      assert.equal(res.status, 0, '应该成功退出');
+      // stdout 必须只有那一行 JSON-RPC 报文
+      assert.equal(res.stdout, '{"jsonrpc":"2.0","id":1,"result":{"capabilities":{}}}\n');
+      // 杂质必须被完整重定向至 stderr
+      assert.match(res.stderr, /:: Spring Boot ::/);
+      assert.match(res.stderr, /McpServerRocketmqApplication starting/);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
 });
+
